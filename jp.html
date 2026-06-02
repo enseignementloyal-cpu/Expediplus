@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>JPSTARS PRODUCTION - Gestion Multimédia (HTG)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { background: #f0f2f5; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .card { transition: all 0.2s ease; }
+        .tab-active { border-bottom: 3px solid #4f46e5; color: #1e293b; font-weight: 600; background: transparent; }
+        .btn-primary { background: #4f46e5; transition: all 0.2s; }
+        .btn-primary:hover { background: #4338ca; transform: translateY(-1px); }
+        @media print {
+            .no-print { display: none !important; }
+            .print-area { margin: 0; padding: 1rem; background: white; }
+        }
+    </style>
+</head>
+<body class="antialiased">
+<div id="app"></div>
+
+<script>
+    // ======================== CONSTANTES & STOCKAGE ========================
+    const STORE = {
+        USERS: 'jp_users',
+        SERVICES: 'jp_services',
+        ORDERS: 'jp_orders',
+        SETTINGS: 'jp_settings',
+        EVENTS: 'jp_events',
+        APPOINTMENTS: 'jp_appointments'
+    };
+    const CURR = 'HTG';
+    const formatPrice = (amount) => new Intl.NumberFormat('fr-HT', { style: 'currency', currency: 'HTG' }).format(amount).replace('HTG', 'Gdes');
+
+    // Helpers
+    const get = (key) => JSON.parse(localStorage.getItem(key) || '[]');
+    const set = (key, data) => localStorage.setItem(key, JSON.stringify(data));
+    const escape = (str) => str?.replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m] || m)) || '';
+
+    // Initialisation
+    function init() {
+        if (!localStorage.getItem(STORE.USERS)) {
+            set(STORE.USERS, [
+                { id: 1, username: 'admin', password: 'admin123', role: 'admin', name: 'Administrateur' },
+                { id: 2, username: 'caissier', password: 'caissier123', role: 'cashier', name: 'Caissier' }
+            ]);
+        }
+        if (!localStorage.getItem(STORE.SERVICES)) {
+            set(STORE.SERVICES, [
+                { id: 1, name: 'Montage vidéo pro', price: 15000, desc: 'Montage HD complet' },
+                { id: 2, name: 'Shooting photo studio', price: 25000, desc: '2h studio + 10 retouches' },
+                { id: 3, name: 'Motion design 30s', price: 35000, desc: 'Animation sur mesure' },
+                { id: 4, name: 'Mixage audio', price: 8000, desc: 'Nettoyage et mastering' }
+            ]);
+        }
+        if (!localStorage.getItem(STORE.EVENTS)) {
+            set(STORE.EVENTS, [
+                { id: 101, name: 'Soirée de gala', date: '2025-07-15', price: 120000, duration: '4h', location: 'Port-au-Prince', type: 'Gala' },
+                { id: 102, name: 'Conférence Tech', date: '2025-08-20', price: 85000, duration: '3h', location: 'Pétion-Ville', type: 'Conférence' }
+            ]);
+        }
+        if (!localStorage.getItem(STORE.ORDERS)) set(STORE.ORDERS, []);
+        if (!localStorage.getItem(STORE.APPOINTMENTS)) set(STORE.APPOINTMENTS, []);
+        if (!localStorage.getItem(STORE.SETTINGS)) {
+            set(STORE.SETTINGS, { logoUrl: '', companyName: 'JPSTARS PRODUCTION' });
+        }
+    }
+
+    let currentUser = null;
+    let activeCashTab = 'vente';
+    let cart = []; // { id, name, price, qty }
+
+    // ======================== RENDU PRINCIPAL ========================
+    function render() {
+        const app = document.getElementById('app');
+        if (!currentUser) {
+            app.innerHTML = loginScreen();
+            attachLoginEvents();
+        } else if (currentUser.role === 'admin') {
+            app.innerHTML = adminDashboard();
+            attachAdminTabs();
+            loadAdminTab('services');
+        } else {
+            app.innerHTML = cashierDashboard();
+            attachCashierEvents();
+            loadCashierTab(activeCashTab);
+        }
+    }
+
+    // ---------- Écran de connexion (aucune info affichée) ----------
+    function loginScreen() {
+        return `
+            <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-800">
+                <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md relative">
+                    <div class="text-center mb-6">
+                        <div class="flex justify-center mb-3"><i class="fas fa-film text-5xl text-indigo-600"></i></div>
+                        <h1 class="text-2xl font-bold">JPSTARS PRODUCTION</h1>
+                        <p class="text-gray-500 text-sm">Gestion multimédia</p>
+                    </div>
+                    <form id="loginForm">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 mb-1">Utilisateur</label>
+                            <input type="text" id="loginUser" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                        </div>
+                        <div class="mb-6">
+                            <label class="block text-gray-700 mb-1">Mot de passe</label>
+                            <input type="password" id="loginPass" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                        </div>
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition">Connexion</button>
+                    </form>
+                    <button id="resetDataBtn" class="absolute bottom-2 right-2 text-gray-300 text-xs opacity-40 hover:opacity-100" title="Réinitialiser toutes les données">⟳</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function attachLoginEvents() {
+        document.getElementById('loginForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = document.getElementById('loginUser').value.trim();
+            const password = document.getElementById('loginPass').value.trim();
+            const users = get(STORE.USERS);
+            const user = users.find(u => u.username === username && u.password === password);
+            if (user) {
+                currentUser = { id: user.id, username: user.username, role: user.role };
+                render();
+            } else {
+                alert('Identifiants incorrects');
+            }
+        });
+        document.getElementById('resetDataBtn')?.addEventListener('click', () => {
+            if (confirm('⚠️ Effacer TOUTES les données ? Cette action est irréversible.')) {
+                localStorage.clear();
+                init();
+                alert('Données réinitialisées. Utilisez admin/admin123 ou caissier/caissier123');
+                location.reload();
+            }
+        });
+    }
+
+    // ======================== ADMIN DASHBOARD ========================
+    function adminDashboard() {
+        const settings = get(STORE.SETTINGS);
+        return `
+            <div class="max-w-7xl mx-auto px-4 py-6">
+                <div class="bg-white rounded-2xl shadow-md p-4 flex justify-between items-center mb-6">
+                    <div class="flex items-center gap-3">
+                        ${settings.logoUrl ? `<img src="${settings.logoUrl}" class="h-10 w-auto object-contain">` : `<i class="fas fa-film text-2xl text-indigo-600"></i>`}
+                        <span class="font-semibold text-gray-700">${escape(settings.companyName)}</span>
+                        <span class="text-sm text-gray-500 ml-2">(Admin: ${currentUser.username})</span>
+                    </div>
+                    <button id="adminLogout" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>
+                </div>
+                <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                    <div class="flex border-b flex-wrap">
+                        <button data-tab="services" class="admin-tab px-5 py-3 text-gray-600 hover:text-indigo-600 transition"><i class="fas fa-cogs mr-1"></i> Services</button>
+                        <button data-tab="events" class="admin-tab px-5 py-3 text-gray-600 hover:text-indigo-600 transition"><i class="fas fa-calendar-alt mr-1"></i> Événements</button>
+                        <button data-tab="users" class="admin-tab px-5 py-3 text-gray-600 hover:text-indigo-600 transition"><i class="fas fa-users mr-1"></i> Utilisateurs</button>
+                        <button data-tab="reports" class="admin-tab px-5 py-3 text-gray-600 hover:text-indigo-600 transition"><i class="fas fa-chart-line mr-1"></i> Rapports</button>
+                        <button data-tab="settings" class="admin-tab px-5 py-3 text-gray-600 hover:text-indigo-600 transition"><i class="fas fa-sliders-h mr-1"></i> Paramètres</button>
+                    </div>
+                    <div id="adminContent" class="p-6"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    function attachAdminTabs() {
+        document.getElementById('adminLogout')?.addEventListener('click', () => { currentUser = null; render(); });
+        const tabs = document.querySelectorAll('.admin-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('tab-active', 'border-indigo-600', 'text-indigo-700'));
+                tab.classList.add('tab-active', 'border-indigo-600', 'text-indigo-700');
+                loadAdminTab(tab.dataset.tab);
+            });
+        });
+    }
+
+    function loadAdminTab(tabName) {
+        const container = document.getElementById('adminContent');
+        if (!container) return;
+        if (tabName === 'services') renderAdminServices(container);
+        else if (tabName === 'events') renderAdminEvents(container);
+        else if (tabName === 'users') renderAdminUsers(container);
+        else if (tabName === 'reports') renderAdminReports(container);
+        else if (tabName === 'settings') renderAdminSettings(container);
+    }
+
+    function renderAdminServices(container) {
+        let services = get(STORE.SERVICES);
+        container.innerHTML = `
+            <div class="flex justify-between items-center mb-5"><h2 class="text-xl font-bold">Services & Tarifs</h2><button id="addSvc" class="bg-green-600 text-white px-4 py-2 rounded-lg shadow"><i class="fas fa-plus"></i> Ajouter</button></div>
+            <div class="grid gap-3 md:grid-cols-2">
+                ${services.map(s => `
+                    <div class="border rounded-xl p-4 bg-gray-50 flex justify-between items-center">
+                        <div><h3 class="font-bold">${escape(s.name)}</h3><p class="text-sm text-gray-500">${escape(s.desc)}</p><span class="text-indigo-700 font-semibold">${formatPrice(s.price)}</span></div>
+                        <div><button class="editSvc text-blue-600 mr-2" data-id="${s.id}"><i class="fas fa-edit"></i></button><button class="delSvc text-red-600" data-id="${s.id}"><i class="fas fa-trash"></i></button></div>
+                    </div>
+                `).join('')}
+                ${services.length === 0 ? '<div class="col-span-2 text-center text-gray-400">Aucun service</div>' : ''}
+            </div>
+        `;
+        document.getElementById('addSvc')?.addEventListener('click', () => openServiceModal(null, () => renderAdminServices(container)));
+        container.querySelectorAll('.editSvc').forEach(btn => btn.addEventListener('click', () => { const s = get(STORE.SERVICES).find(s => s.id === parseInt(btn.dataset.id)); if(s) openServiceModal(s, () => renderAdminServices(container)); }));
+        container.querySelectorAll('.delSvc').forEach(btn => btn.addEventListener('click', () => { if(confirm('Supprimer ce service ?')) { let svcs = get(STORE.SERVICES).filter(s => s.id !== parseInt(btn.dataset.id)); set(STORE.SERVICES, svcs); renderAdminServices(container); } }));
+    }
+
+    function openServiceModal(service, callback) {
+        const isEdit = !!service;
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+        modal.innerHTML = `<div class="bg-white rounded-xl p-6 w-96"><h3 class="font-bold text-lg mb-3">${isEdit ? 'Modifier' : 'Ajouter'} service</h3><div><label>Nom</label><input id="svcName" class="w-full border rounded p-2 mb-2" value="${service ? escape(service.name) : ''}"></div><div><label>Description</label><textarea id="svcDesc" class="w-full border rounded p-2 mb-2">${service ? escape(service.desc||'') : ''}</textarea></div><div><label>Prix (Gdes)</label><input id="svcPrice" type="number" class="w-full border rounded p-2 mb-4" value="${service ? service.price : ''}"></div><div class="flex justify-end gap-2"><button id="cancelModal" class="bg-gray-300 px-4 py-2 rounded">Annuler</button><button id="saveModal" class="bg-indigo-600 text-white px-4 py-2 rounded">Enregistrer</button></div></div>`;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        document.getElementById('cancelModal')?.addEventListener('click', close);
+        document.getElementById('saveModal')?.addEventListener('click', () => {
+            const name = document.getElementById('svcName').value.trim();
+            const desc = document.getElementById('svcDesc').value.trim();
+            const price = parseFloat(document.getElementById('svcPrice').value);
+            if (!name || isNaN(price)) { alert('Nom et prix valides requis'); return; }
+            let services = get(STORE.SERVICES);
+            if (isEdit) {
+                const idx = services.findIndex(s => s.id === service.id);
+                if (idx !== -1) services[idx] = { ...services[idx], name, desc, price };
+            } else { services.push({ id: Date.now(), name, desc, price }); }
+            set(STORE.SERVICES, services);
+            close();
+            if (callback) callback();
+        });
+    }
+
+    function renderAdminEvents(container) {
+        let events = get(STORE.EVENTS);
+        container.innerHTML = `
+            <div class="flex justify-between mb-4"><h2 class="text-xl font-bold">Événements</h2><button id="addEvent" class="bg-purple-600 text-white px-4 py-2 rounded-lg"><i class="fas fa-plus"></i> Ajouter</button></div>
+            <div class="overflow-x-auto"><table class="min-w-full bg-white border"><thead class="bg-gray-100"><tr><th>Nom</th><th>Date</th><th>Prix</th><th>Lieu/Type</th><th>Actions</th></tr></thead><tbody>${events.map(e => `<tr><td>${escape(e.name)}</td><td>${e.date}</td><td>${formatPrice(e.price)}</td><td>${escape(e.location)} / ${escape(e.type)}</td><td><button class="editEvent text-blue-600 mr-2" data-id="${e.id}"><i class="fas fa-edit"></i></button><button class="delEvent text-red-600" data-id="${e.id}"><i class="fas fa-trash"></i></button></td></tr>`).join('')}</tbody></table></div>
+        `;
+        document.getElementById('addEvent')?.addEventListener('click', () => openEventModal(null, () => renderAdminEvents(container)));
+        container.querySelectorAll('.editEvent').forEach(btn => btn.addEventListener('click', () => { const ev = get(STORE.EVENTS).find(e => e.id === parseInt(btn.dataset.id)); if(ev) openEventModal(ev, () => renderAdminEvents(container)); }));
+        container.querySelectorAll('.delEvent').forEach(btn => btn.addEventListener('click', () => { if(confirm('Supprimer ?')) { let evs = get(STORE.EVENTS).filter(e => e.id !== parseInt(btn.dataset.id)); set(STORE.EVENTS, evs); renderAdminEvents(container); } }));
+    }
+
+    function openEventModal(event, callback) {
+        const isEdit = !!event;
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+        modal.innerHTML = `<div class="bg-white rounded-xl p-6 w-96"><h3 class="font-bold text-lg">${isEdit ? 'Modifier' : 'Ajouter'} événement</h3><div><label>Nom</label><input id="evName" class="w-full border rounded p-2 mb-2" value="${event ? escape(event.name) : ''}"></div><div><label>Date (YYYY-MM-DD)</label><input id="evDate" type="date" class="w-full border rounded p-2 mb-2" value="${event ? event.date : ''}"></div><div><label>Prix (Gdes)</label><input id="evPrice" type="number" class="w-full border rounded p-2 mb-2" value="${event ? event.price : ''}"></div><div><label>Durée</label><input id="evDuration" class="w-full border rounded p-2 mb-2" value="${event ? event.duration : ''}"></div><div><label>Lieu</label><input id="evLocation" class="w-full border rounded p-2 mb-2" value="${event ? event.location : ''}"></div><div><label>Type</label><input id="evType" class="w-full border rounded p-2 mb-4" value="${event ? event.type : ''}"></div><div class="flex justify-end gap-2"><button id="cancelEv" class="bg-gray-300 px-4 py-2 rounded">Annuler</button><button id="saveEv" class="bg-purple-600 text-white px-4 py-2 rounded">Enregistrer</button></div></div>`;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        document.getElementById('cancelEv')?.addEventListener('click', close);
+        document.getElementById('saveEv')?.addEventListener('click', () => {
+            const name = document.getElementById('evName').value.trim();
+            const date = document.getElementById('evDate').value;
+            const price = parseFloat(document.getElementById('evPrice').value);
+            const duration = document.getElementById('evDuration').value.trim();
+            const location = document.getElementById('evLocation').value.trim();
+            const type = document.getElementById('evType').value.trim();
+            if (!name || !date || isNaN(price)) { alert('Nom, date et prix requis'); return; }
+            let events = get(STORE.EVENTS);
+            if (isEdit) {
+                const idx = events.findIndex(e => e.id === event.id);
+                if (idx !== -1) events[idx] = { ...events[idx], name, date, price, duration, location, type };
+            } else { events.push({ id: Date.now(), name, date, price, duration, location, type }); }
+            set(STORE.EVENTS, events);
+            close();
+            if (callback) callback();
+        });
+    }
+
+    function renderAdminUsers(container) {
+        let users = get(STORE.USERS);
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-3">Utilisateurs</h2>
+            <div class="flex gap-2 mb-4 flex-wrap"><input id="newUname" placeholder="Nom user" class="border rounded p-2"><input id="newPwd" placeholder="Mot de passe" type="password" class="border rounded p-2"><select id="newRole" class="border rounded p-2"><option value="cashier">Caissier</option><option value="admin">Admin</option></select><button id="createUser" class="bg-indigo-600 text-white px-4 py-2 rounded">Ajouter</button></div>
+            <table class="w-full border"><thead class="bg-gray-100"><tr><th>Nom</th><th>Rôle</th><th>Actions</th></tr></thead><tbody>${users.map(u => `<tr><td>${escape(u.username)}</td><td>${u.role}</td><td>${u.role !== 'admin' ? `<button class="delUser text-red-600" data-id="${u.id}"><i class="fas fa-trash"></i></button>` : '—'}</td></tr>`).join('')}</tbody></table>
+        `;
+        document.getElementById('createUser')?.addEventListener('click', () => {
+            const username = document.getElementById('newUname').value.trim();
+            const pwd = document.getElementById('newPwd').value.trim();
+            const role = document.getElementById('newRole').value;
+            if (!username || !pwd) { alert('Champs requis'); return; }
+            let users = get(STORE.USERS);
+            if (users.find(u => u.username === username)) { alert('Nom déjà utilisé'); return; }
+            users.push({ id: Date.now(), username, password: pwd, role, name: username });
+            set(STORE.USERS, users);
+            renderAdminUsers(container);
+        });
+        container.querySelectorAll('.delUser').forEach(btn => btn.addEventListener('click', () => { let users = get(STORE.USERS).filter(u => u.id !== parseInt(btn.dataset.id)); set(STORE.USERS, users); renderAdminUsers(container); }));
+    }
+
+    function renderAdminReports(container) {
+        const orders = get(STORE.ORDERS);
+        const totalCA = orders.reduce((s, o) => s + (o.total || 0), 0);
+        const byType = orders.reduce((acc, o) => { acc[o.type] = (acc[o.type] || 0) + 1; return acc; }, {});
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-4">Rapports financiers</h2>
+            <div class="grid md:grid-cols-3 gap-4 mb-6">
+                <div class="bg-blue-50 p-4 rounded-xl shadow"><i class="fas fa-chart-line"></i> Total transactions : ${orders.length}</div>
+                <div class="bg-green-50 p-4 rounded-xl shadow"><i class="fas fa-money-bill"></i> Chiffre d'affaires : ${formatPrice(totalCA)}</div>
+                <div class="bg-purple-50 p-4 rounded-xl shadow"><i class="fas fa-tags"></i> Par type : ${Object.entries(byType).map(([k,v]) => `${k}:${v}`).join(', ')}</div>
+            </div>
+            <div class="overflow-auto max-h-96"><table class="w-full border text-sm"><thead class="bg-gray-100"><tr><th>ID</th><th>Client</th><th>Montant</th><th>Type</th><th>Date</th><th>Détails</th></tr></thead><tbody>${orders.slice().reverse().map(o => `<tr><td>#${o.id}</td><td>${escape(o.clientName)}</td><td>${formatPrice(o.total)}</td><td>${o.type || 'commande'}</td><td>${new Date(o.createdAt).toLocaleDateString()}</td><td>${o.items?.map(i=>i.name).join(', ') || o.event || ''}</td></tr>`).join('')}</tbody></table></div>
+        `;
+    }
+
+    function renderAdminSettings(container) {
+        const settings = get(STORE.SETTINGS);
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-4">Paramètres</h2>
+            <div class="space-y-4"><div><label>Nom de l'entreprise</label><input id="compName" class="w-full border rounded p-2" value="${escape(settings.companyName)}"></div>
+            <div><label>URL du logo</label><input id="logoUrl" class="w-full border rounded p-2" value="${settings.logoUrl || ''}"></div>
+            <div id="logoPreview" class="h-20 flex items-center justify-center border rounded bg-gray-50">${settings.logoUrl ? `<img src="${settings.logoUrl}" class="max-h-16">` : 'Aperçu'}</div>
+            <button id="saveSettings" class="bg-indigo-600 text-white px-4 py-2 rounded">Enregistrer</button></div>
+        `;
+        document.getElementById('logoUrl')?.addEventListener('input', (e) => { const preview = document.getElementById('logoPreview'); preview.innerHTML = e.target.value ? `<img src="${e.target.value}" class="max-h-16">` : 'Aperçu'; });
+        document.getElementById('saveSettings')?.addEventListener('click', () => {
+            let sets = get(STORE.SETTINGS);
+            sets.companyName = document.getElementById('compName').value.trim();
+            sets.logoUrl = document.getElementById('logoUrl').value.trim();
+            set(STORE.SETTINGS, sets);
+            alert('Paramètres mis à jour');
+            renderAdminSettings(container);
+        });
+    }
+
+    // ======================== CAISSIER DASHBOARD ========================
+    function cashierDashboard() {
+        const settings = get(STORE.SETTINGS);
+        return `
+            <div class="max-w-7xl mx-auto px-4 py-6">
+                <div class="bg-white rounded-2xl shadow-md p-4 flex justify-between items-center mb-6">
+                    <div class="flex items-center gap-3">
+                        ${settings.logoUrl ? `<img src="${settings.logoUrl}" class="h-10 w-auto object-contain">` : `<i class="fas fa-film text-2xl text-indigo-600"></i>`}
+                        <span class="font-semibold text-gray-700">${escape(settings.companyName)}</span>
+                        <span class="text-sm text-gray-500 ml-2">(Caissier: ${currentUser.username})</span>
+                    </div>
+                    <button id="cashLogout" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>
+                </div>
+                <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                    <div class="flex border-b flex-wrap">
+                        <button data-tab="vente" class="cash-tab px-5 py-3 text-gray-600 hover:text-indigo-600"><i class="fas fa-shopping-cart mr-1"></i> Vente (Panier)</button>
+                        <button data-tab="proforma" class="cash-tab px-5 py-3 text-gray-600 hover:text-indigo-600"><i class="fas fa-file-invoice mr-1"></i> Proforma</button>
+                        <button data-tab="events" class="cash-tab px-5 py-3 text-gray-600 hover:text-indigo-600"><i class="fas fa-calendar-check mr-1"></i> Événements</button>
+                        <button data-tab="rdv" class="cash-tab px-5 py-3 text-gray-600 hover:text-indigo-600"><i class="fas fa-clock mr-1"></i> Rendez-vous</button>
+                    </div>
+                    <div id="cashContent" class="p-6"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    function attachCashierEvents() {
+        document.getElementById('cashLogout')?.addEventListener('click', () => { currentUser = null; render(); });
+        const tabs = document.querySelectorAll('.cash-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('tab-active', 'border-indigo-600', 'text-indigo-700'));
+                tab.classList.add('tab-active', 'border-indigo-600', 'text-indigo-700');
+                activeCashTab = tab.dataset.tab;
+                loadCashierTab(activeCashTab);
+            });
+        });
+    }
+
+    function loadCashierTab(tabName) {
+        const container = document.getElementById('cashContent');
+        if (!container) return;
+        if (tabName === 'vente') renderVenteCart(container);
+        else if (tabName === 'proforma') renderProforma(container);
+        else if (tabName === 'events') renderCashEvents(container);
+        else if (tabName === 'rdv') renderRdv(container);
+    }
+
+    // Panier dynamique
+    function renderVenteCart(container) {
+        const services = get(STORE.SERVICES);
+        const updateCart = () => {
+            const cartDiv = document.getElementById('cartItems');
+            const totalSpan = document.getElementById('cartTotal');
+            if (!cartDiv) return;
+            if (cart.length === 0) { cartDiv.innerHTML = '<div class="text-gray-400 text-center py-4">Panier vide</div>'; totalSpan.innerText = formatPrice(0); return; }
+            let total = 0;
+            cartDiv.innerHTML = cart.map((item, idx) => {
+                const lineTotal = item.price * item.qty;
+                total += lineTotal;
+                return `<div class="flex justify-between items-center border-b py-2"><span>${escape(item.name)} x ${item.qty}</span><span>${formatPrice(lineTotal)}</span><button class="removeItem text-red-500 ml-2" data-idx="${idx}"><i class="fas fa-trash"></i></button></div>`;
+            }).join('');
+            totalSpan.innerText = formatPrice(total);
+            document.querySelectorAll('.removeItem').forEach(btn => btn.addEventListener('click', () => { const idx = parseInt(btn.dataset.idx); cart.splice(idx,1); updateCart(); }));
+        };
+        container.innerHTML = `
+            <div class="grid md:grid-cols-2 gap-6">
+                <div><h2 class="text-xl font-bold mb-3">Services disponibles</h2><div class="space-y-2 max-h-96 overflow-auto">${services.map(s => `<div class="border rounded-lg p-3 flex justify-between items-center"><div><span class="font-medium">${escape(s.name)}</span><br><span class="text-sm text-gray-500">${formatPrice(s.price)}</span></div><div><input type="number" id="qty_${s.id}" class="w-16 border text-center rounded" value="0" min="0"><button class="addToCart ml-2 bg-indigo-600 text-white px-3 py-1 rounded text-sm" data-id="${s.id}" data-name="${escape(s.name)}" data-price="${s.price}"><i class="fas fa-cart-plus"></i> Ajouter</button></div></div>`).join('')}</div></div>
+                <div><h2 class="text-xl font-bold mb-3">Panier</h2><div id="cartItems" class="border rounded-lg p-3 min-h-[200px] bg-gray-50">Panier vide</div><div class="flex justify-between font-bold mt-3 text-lg"><span>Total :</span> <span id="cartTotal">${formatPrice(0)}</span></div><div class="mt-4"><label>Client</label><input id="clientName" class="w-full border rounded p-2 mb-2"><label>Téléphone</label><input id="clientPhone" class="w-full border rounded p-2"></div><button id="validateCart" class="mt-4 bg-green-600 text-white w-full py-2 rounded-lg shadow"><i class="fas fa-receipt"></i> Valider & Imprimer le ticket</button></div>
+            </div>
+        `;
+        document.querySelectorAll('.addToCart').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = parseInt(btn.dataset.id);
+                const name = btn.dataset.name;
+                const price = parseFloat(btn.dataset.price);
+                const qtyInput = document.getElementById(`qty_${id}`);
+                let qty = parseInt(qtyInput.value);
+                if (isNaN(qty) || qty <= 0) { alert('Quantité invalide'); return; }
+                const existing = cart.find(i => i.id === id);
+                if (existing) existing.qty += qty;
+                else cart.push({ id, name, price, qty });
+                qtyInput.value = 0;
+                updateCart();
+            });
+        });
+        document.getElementById('validateCart')?.addEventListener('click', () => {
+            const client = document.getElementById('clientName').value.trim();
+            const phone = document.getElementById('clientPhone').value.trim();
+            if (!client) { alert('Nom client requis'); return; }
+            if (cart.length === 0) { alert('Panier vide'); return; }
+            let items = cart.map(i => ({ name: i.name, qty: i.qty, price: i.price, total: i.price * i.qty }));
+            let total = items.reduce((s, i) => s + i.total, 0);
+            const settings = get(STORE.SETTINGS);
+            const ticket = `<div class="print-area text-center"><div>${settings.logoUrl ? `<img src="${settings.logoUrl}" style="max-height:70px;">` : `<h2>${settings.companyName}</h2>`}</div><h3 class="text-lg font-bold">TICKET DE SERVICE</h3><p>Client: ${escape(client)}<br>Tél: ${escape(phone)}<br>Date: ${new Date().toLocaleString()}</p><table class="w-full border-t"><thead><tr><th>Service</th><th>Qté</th><th>P.U.</th><th>Total</th></tr></thead><tbody>${items.map(i => `<tr><td>${escape(i.name)}</td><td>${i.qty}</td><td>${formatPrice(i.price)}</td><td>${formatPrice(i.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="3" class="text-right font-bold">Total :</td><td>${formatPrice(total)}</td></tr></tfoot></table><p class="text-xs mt-3">Merci - JPSTARS</p></div>`;
+            const win = window.open('', '_blank');
+            win.document.write(`<html><head><title>Ticket ${client}</title><style>body{padding:20px;font-family:sans-serif}table{width:100%;border-collapse:collapse;}td,th{padding:8px;}</style></head><body>${ticket}</body></html>`);
+            win.document.close();
+            win.print();
+            let orders = get(STORE.ORDERS);
+            orders.push({ id: Date.now(), clientName: client, clientPhone: phone, items, total, type: 'ticket', createdAt: new Date().toISOString() });
+            set(STORE.ORDERS, orders);
+            cart = [];
+            renderVenteCart(container);
+            alert('Ticket imprimé et enregistré');
+        });
+        updateCart();
+    }
+
+    function renderProforma(container) {
+        const services = get(STORE.SERVICES);
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-3">Créer une Proforma</h2>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div><label>Client</label><input id="profClient" class="w-full border rounded p-2 mb-2"><label>Téléphone WhatsApp</label><input id="profPhone" class="w-full border rounded p-2"><div class="mt-3"><h3 class="font-semibold">Services</h3><div id="profServicesList" class="max-h-80 overflow-auto border rounded p-2 space-y-2">${services.map(s => `<div class="flex justify-between"><span>${escape(s.name)} - ${formatPrice(s.price)}</span><input type="number" id="p_qty_${s.id}" class="w-16 border text-center" value="0"></div>`).join('')}</div></div></div>
+                <div class="bg-gray-50 p-4 rounded-xl"><h3 class="font-bold">Aperçu proforma</h3><p>Les services sélectionnés seront listés avec total.</p><button id="genProforma" class="mt-4 bg-blue-600 text-white w-full py-2 rounded shadow"><i class="fas fa-file-pdf"></i> Générer & Imprimer</button><button id="sendWhatsapp" class="mt-2 bg-green-600 text-white w-full py-2 rounded shadow"><i class="fab fa-whatsapp"></i> Envoyer par WhatsApp</button></div>
+            </div>
+        `;
+        document.getElementById('genProforma')?.addEventListener('click', () => generateProforma(false));
+        document.getElementById('sendWhatsapp')?.addEventListener('click', () => generateProforma(true));
+        function generateProforma(sendWhatsApp) {
+            const client = document.getElementById('profClient').value.trim();
+            const phone = document.getElementById('profPhone').value.trim();
+            if (!client) { alert('Nom client requis'); return; }
+            let items = [], total = 0;
+            services.forEach(s => {
+                let qty = parseInt(document.getElementById(`p_qty_${s.id}`)?.value || '0');
+                if (qty > 0) { total += qty * s.price; items.push({ name: s.name, qty, price: s.price, total: qty*s.price }); }
+            });
+            if (items.length === 0) { alert('Ajoutez au moins un service'); return; }
+            const settings = get(STORE.SETTINGS);
+            const proformaHtml = `<div class="print-area"><div class="text-center">${settings.logoUrl ? `<img src="${settings.logoUrl}" style="max-height:70px;">` : `<h2>${settings.companyName}</h2>`}</div><h3 class="text-center font-bold text-xl">PROFORMA</h3><p>Client: ${escape(client)}<br>Tél: ${escape(phone)}<br>Date: ${new Date().toLocaleString()}</p><table class="w-full border mt-3"><thead><tr><th>Service</th><th>Qté</th><th>P.U.</th><th>Total</th></tr></thead><tbody>${items.map(i => `<tr><td>${escape(i.name)}</td><td>${i.qty}</td><td>${formatPrice(i.price)}</td><td>${formatPrice(i.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="3" class="text-right font-bold">Total :</td><td>${formatPrice(total)}</td></tr></tfoot></table><p class="text-center text-sm mt-4">Valable 30 jours - Merci</p></div>`;
+            const win = window.open('', '_blank');
+            win.document.write(`<html><head><title>Proforma ${client}</title><style>body{padding:20px;}table{width:100%;border-collapse:collapse;}td,th{padding:8px;}</style></head><body>${proformaHtml}</body></html>`);
+            win.document.close();
+            win.print();
+            if (sendWhatsApp && phone) {
+                const msg = `Bonjour ${client}, voici votre proforma ${settings.companyName} total ${formatPrice(total)}.`;
+                window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
+            }
+            let orders = get(STORE.ORDERS);
+            orders.push({ id: Date.now(), clientName: client, clientPhone: phone, items, total, type: 'proforma', createdAt: new Date().toISOString() });
+            set(STORE.ORDERS, orders);
+            alert('Proforma générée et sauvegardée');
+        }
+    }
+
+    function renderCashEvents(container) {
+        const events = get(STORE.EVENTS);
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-3">Réservation d'événement</h2>
+            <div class="grid md:grid-cols-2 gap-4"><div><label>Client</label><input id="evClient" class="w-full border rounded p-2"><label>Téléphone</label><input id="evPhone" class="w-full border rounded p-2 mt-2"><label>Événement</label><select id="evSelect" class="w-full border rounded p-2 mt-2">${events.map(e => `<option value='${JSON.stringify(e)}'>${escape(e.name)} - ${formatPrice(e.price)} (${e.date})</option>`).join('')}</select><button id="bookEvent" class="mt-4 bg-purple-600 text-white w-full py-2 rounded shadow"><i class="fas fa-ticket-alt"></i> Réserver & Imprimer</button></div><div class="bg-gray-50 p-4 rounded"><h3 class="font-bold">Informations</h3><p>Le ticket événement sera imprimé et la commande sauvegardée.</p></div></div>
+        `;
+        document.getElementById('bookEvent')?.addEventListener('click', () => {
+            const client = document.getElementById('evClient').value.trim();
+            const phone = document.getElementById('evPhone').value.trim();
+            if (!client) { alert('Nom client requis'); return; }
+            const ev = JSON.parse(document.getElementById('evSelect').value);
+            const settings = get(STORE.SETTINGS);
+            const ticket = `<div class="print-area text-center"><div>${settings.logoUrl ? `<img src="${settings.logoUrl}" style="max-height:70px;">` : `<h2>${settings.companyName}</h2>`}</div><h3 class="text-lg font-bold">TICKET ÉVÉNEMENT</h3><p>Client: ${escape(client)}<br>Tél: ${escape(phone)}<br>Événement: ${escape(ev.name)}<br>Date: ${ev.date}<br>Lieu: ${ev.location}<br>Montant: ${formatPrice(ev.price)}</p><p>Merci !</p></div>`;
+            const win = window.open('', '_blank');
+            win.document.write(`<html><head><title>Ticket ${client}</title><style>body{padding:20px;}</style></head><body>${ticket}</body></html>`);
+            win.document.close();
+            win.print();
+            let orders = get(STORE.ORDERS);
+            orders.push({ id: Date.now(), clientName: client, clientPhone: phone, event: ev.name, total: ev.price, type: 'event', createdAt: new Date().toISOString() });
+            set(STORE.ORDERS, orders);
+            alert('Réservation enregistrée');
+        });
+    }
+
+    function renderRdv(container) {
+        const rdvs = get(STORE.APPOINTMENTS);
+        container.innerHTML = `
+            <h2 class="text-xl font-bold mb-3">Planifier un rendez-vous</h2>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div><label>Client</label><input id="rdvClient" class="w-full border rounded p-2"><label>Téléphone</label><input id="rdvPhone" class="w-full border rounded p-2 mt-2"><label>Date</label><input id="rdvDate" type="date" class="w-full border rounded p-2 mt-2"><label>Heure</label><input id="rdvTime" type="time" class="w-full border rounded p-2 mt-2"><label>Objet</label><input id="rdvObjet" class="w-full border rounded p-2 mt-2"><button id="addRdv" class="mt-4 bg-indigo-600 text-white w-full py-2 rounded shadow"><i class="fas fa-save"></i> Enregistrer</button></div>
+                <div><h3 class="font-bold mb-2">Rendez-vous programmés</h3><ul id="rdvList" class="space-y-2 max-h-96 overflow-auto">${rdvs.map(r => `<li class="border p-2 rounded flex justify-between"><span>${r.date} ${r.time} - ${escape(r.client)} (${r.objet})</span><button class="delRdv text-red-500" data-id="${r.id}"><i class="fas fa-times"></i></button></li>`).join('')}</ul></div>
+            </div>
+        `;
+        document.getElementById('addRdv')?.addEventListener('click', () => {
+            const client = document.getElementById('rdvClient').value.trim();
+            const phone = document.getElementById('rdvPhone').value.trim();
+            const date = document.getElementById('rdvDate').value;
+            const time = document.getElementById('rdvTime').value;
+            const objet = document.getElementById('rdvObjet').value.trim();
+            if (!client || !date || !time) { alert('Champs requis'); return; }
+            let rdvsList = get(STORE.APPOINTMENTS);
+            rdvsList.push({ id: Date.now(), client, phone, date, time, objet });
+            set(STORE.APPOINTMENTS, rdvsList);
+            renderRdv(container);
+        });
+        container.querySelectorAll('.delRdv').forEach(btn => btn.addEventListener('click', () => { let rdvsList = get(STORE.APPOINTMENTS).filter(r => r.id !== parseInt(btn.dataset.id)); set(STORE.APPOINTMENTS, rdvsList); renderRdv(container); }));
+    }
+
+    // Lancement
+    init();
+    render();
+</script>
+</body>
+</html>

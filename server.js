@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static('.')); // sert le fichier index.html à la racine
+app.use(express.static('.'));
 
 // ---------- MODÈLES ----------
 const companySchema = new mongoose.Schema({
@@ -68,7 +68,9 @@ const investisseurSchema = new mongoose.Schema({
   email: String,
   telephone1: String,
   telephone2: String,
-  pourcentage: Number
+  pourcentage: Number,
+  dureeMois: { type: Number, default: 12 },       // durée en mois
+  dateDebut: { type: Date, default: Date.now }    // date de début de l'investissement
 });
 const Investisseur = mongoose.model('Investisseur', investisseurSchema);
 
@@ -169,7 +171,6 @@ const MONGODB_URI = process.env.MONGODB_URL || 'mongodb+srv://<username>:<passwo
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(async () => {
     console.log('✅ Connecté à MongoDB Atlas');
-    // Création de données initiales si vide
     const userCount = await User.countDocuments();
     if (userCount === 0) {
       await User.create([
@@ -179,12 +180,14 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
         { nom: 'Admin Système', bureauNom: 'Siège', adresse: '1 Avenue Centrale', role: 'admin', code: 'admin123', email: 'admin@shiplog.com' }
       ]);
       await Company.create({ name: "Ship'Log Express", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5 });
-      await Investisseur.create({ nom: 'Jean Dupont', adresse: '10 Rue des Actionnaires', email: 'jean@example.com', telephone1: '123456789', pourcentage: 15 });
+      await Investisseur.create({ 
+        nom: 'Jean Dupont', adresse: '10 Rue des Actionnaires', email: 'jean@example.com', 
+        telephone1: '123456789', pourcentage: 15, dureeMois: 24, dateDebut: new Date() 
+      });
       console.log('📦 Données initiales créées');
     }
   })
   .catch(err => console.error('❌ Erreur MongoDB:', err));
 
-// ---------- DÉMARRAGE ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));

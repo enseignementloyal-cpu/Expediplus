@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        /* ========== STYLES COMPLETS (inchangés) ========== */
+        /* ========== STYLES (inchangés) ========== */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { background: linear-gradient(145deg, #f6f9fc 0%, #eef2f7 100%); min-height: 100vh; padding: 24px; position: relative; }
         @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -70,7 +70,7 @@
 
 <script>
     // ========== CONNEXION À L'API BACKEND ==========
-    const API_BASE = 'https://expediplus.onrender.com/api';
+    const API_BASE = '/api';  // Utilisation relative (même serveur)
 
     async function apiRequest(endpoint, method = 'GET', body = null) {
         const options = { method, headers: { 'Content-Type': 'application/json' } };
@@ -103,7 +103,6 @@
         notifDiv.appendChild(toast);
         toast.querySelector('button').onclick = () => toast.remove();
         setTimeout(() => toast.remove(), 5000);
-        // Envoyer au backend
         apiRequest('/notifications', 'POST', { message, type }).catch(e => console.warn);
     }
 
@@ -124,10 +123,9 @@
         });
     }
 
-    function calculerPartsInvestisseurs(montantUSD) {
-        let total = 0;
-        appData.investisseurs.forEach(inv => { total += (montantUSD * inv.pourcentage / 100); });
-        return total;
+    // Calcul des parts pour tous les investisseurs (ou un seul)
+    function calculerPartInvestisseur(montantUSD, pourcentage) {
+        return (montantUSD * pourcentage / 100);
     }
 
     function getAdvancedStats() {
@@ -143,9 +141,28 @@
                 else if (c.paiement.devise === 'HTG') totalEntreesUSD += c.paiement.montantRecu / appData.company.tauxUSDToHTG;
             }
         });
-        const partInvestisseurs = calculerPartsInvestisseurs(totalEntreesUSD);
-        const balanceNet = totalEntreesUSD - partInvestisseurs;
-        return { colisTotal, colisLivres, colisEnAttenteConf, colisEnTransit, colisArrives, totalEntreesUSD, partInvestisseurs, balanceNet };
+        const partInvestisseursTotal = appData.investisseurs.reduce((sum, inv) => sum + calculerPartInvestisseur(totalEntreesUSD, inv.pourcentage), 0);
+        const balanceNet = totalEntreesUSD - partInvestisseursTotal;
+        return { colisTotal, colisLivres, colisEnAttenteConf, colisEnTransit, colisArrives, totalEntreesUSD, partInvestisseursTotal, balanceNet };
+    }
+
+    // Statistiques pour un investisseur spécifique
+    function getInvestisseurStats(investisseur) {
+        const global = getAdvancedStats();
+        const partIndividuelle = calculerPartInvestisseur(global.totalEntreesUSD, investisseur.pourcentage);
+        const finInvestissement = new Date(investisseur.dateDebut);
+        finInvestissement.setMonth(finInvestissement.getMonth() + (investisseur.dureeMois || 0));
+        const joursRestants = Math.ceil((finInvestissement - new Date()) / (1000 * 60 * 60 * 24));
+        return {
+            colisTotal: global.colisTotal,
+            totalEntreesUSD: global.totalEntreesUSD,
+            partIndividuelle: partIndividuelle,
+            balanceNet: global.balanceNet,
+            dureeMois: investisseur.dureeMois,
+            dateDebut: investisseur.dateDebut,
+            dateFin: finInvestissement,
+            joursRestants: joursRestants
+        };
     }
 
     function printReceptionLabel(colis) {
@@ -225,8 +242,17 @@
         const isSuperviseur = (currentUser.role === 'superviseur');
         const isInvestisseur = (currentUser.role === 'investisseur');
 
+        // Trouver l'investisseur correspondant (si le user est investisseur)
+        let investisseurActuel = null;
+        if (isInvestisseur) {
+            investisseurActuel = appData.investisseurs.find(inv => inv.email === currentUser.email);
+            if (!investisseurActuel) {
+                // Sinon, essayer par nom (fallback)
+                investisseurActuel = appData.investisseurs.find(inv => inv.nom === currentUser.nom);
+            }
+        }
+
         let mainHtml = "";
-        // Construction du HTML selon le rôle (identique à l'original)
         if (isReceveur) {
             mainHtml = `
                 <div class="flex-row" style="margin-bottom:24px;">
@@ -279,22 +305,25 @@
                 <p>Colis en attente de confirmation par le superviseur</p>
                 <div id="superviseurList" class="card-list"></div>
             `;
-        } else if (isInvestisseur) {
-            const stats = getAdvancedStats();
+        } else if (isInvestisseur && investisseurActuel) {
+            const stats = getInvestisseurStats(investisseurActuel);
             mainHtml = `
                 <h2>📊 Tableau de bord - Investisseur</h2>
                 <div class="stats-grid">
-                    <div class="stat-card"><div class="stat-number">${stats.colisTotal}</div><div>Total colis</div></div>
-                    <div class="stat-card"><div class="stat-number">${stats.colisLivres}</div><div>Livrés</div></div>
-                    <div class="stat-card"><div class="stat-number">${stats.colisEnAttenteConf}</div><div>En attente validation</div></div>
-                    <div class="stat-card"><div class="stat-number">${stats.colisEnTransit}</div><div>En transit</div></div>
-                    <div class="stat-card"><div class="stat-number">${stats.colisArrives}</div><div>Arrivés non livrés</div></div>
+                    <div class="stat-card"><div class="stat-number">${stats.colisTotal}</div><div>Total colis traités</div></div>
                     <div class="stat-card"><div class="stat-number">$${stats.totalEntreesUSD.toFixed(2)}</div><div>Total entrées (USD)</div></div>
-                    <div class="stat-card"><div class="stat-number">$${stats.partInvestisseurs.toFixed(2)}</div><div>Part investisseurs</div></div>
-                    <div class="stat-card"><div class="stat-number">$${stats.balanceNet.toFixed(2)}</div><div>Balance nette</div></div>
+                    <div class="stat-card"><div class="stat-number">$${stats.partIndividuelle.toFixed(2)}</div><div>Votre part (${investisseurActuel.pourcentage}%)</div></div>
+                    <div class="stat-card"><div class="stat-number">$${stats.balanceNet.toFixed(2)}</div><div>Balance nette globale</div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${investisseurActuel.dureeMois} mois</div>
+                    <div>Durée d'investissement</div>
+                    <div style="font-size:0.9rem; margin-top:8px;">📅 Début: ${new Date(investisseurActuel.dateDebut).toLocaleDateString()}</div>
+                    <div style="font-size:0.9rem;">⏳ Fin: ${new Date(stats.dateFin).toLocaleDateString()}</div>
+                    <div style="font-size:0.9rem;">📆 Jours restants: ${stats.joursRestants > 0 ? stats.joursRestants : 'Terminé'}</div>
                 </div>
                 <canvas id="investisseurChart" width="400" height="200"></canvas>
-                <h3>📋 Liste des colis</h3>
+                <h3>📋 Derniers colis</h3>
                 <div id="globalColisInvestisseur" class="card-list"></div>
             `;
         } else if (isAdmin) {
@@ -304,7 +333,7 @@
                     <div class="dashboard-grid">
                         <div class="dashboard-card" data-view="stats"><div style="font-size:2.5rem;">📊</div><h3>Tableau de bord</h3><p>Statistiques visuelles</p></div>
                         <div class="dashboard-card" data-view="users"><div style="font-size:2.5rem;">👥</div><h3>Utilisateurs</h3><p>Gérer les comptes</p></div>
-                        <div class="dashboard-card" data-view="investisseurs"><div style="font-size:2.5rem;">💰</div><h3>Investisseurs</h3><p>Gérer les parts</p></div>
+                        <div class="dashboard-card" data-view="investisseurs"><div style="font-size:2.5rem;">💰</div><h3>Investisseurs</h3><p>Gérer les parts et durées</p></div>
                         <div class="dashboard-card" data-view="settings"><div style="font-size:2.5rem;">⚙️</div><h3>Paramètres</h3><p>Entreprise, tarifs</p></div>
                         <div class="dashboard-card" data-view="search"><div style="font-size:2.5rem;">🔍</div><h3>Recherche colis</h3><p>Suivi global</p></div>
                         <div class="dashboard-card" data-view="addresses"><div style="font-size:2.5rem;">🏢</div><h3>Adresses bureaux</h3><p>Voir toutes les adresses</p></div>
@@ -316,7 +345,7 @@
                         <div class="stat-card"><div class="stat-number">${stats.colisEnTransit}</div><div>En transit</div></div>
                         <div class="stat-card"><div class="stat-number">${stats.colisArrives}</div><div>Arrivés non livrés</div></div>
                         <div class="stat-card"><div class="stat-number">$${stats.totalEntreesUSD.toFixed(2)}</div><div>Total entrées (USD)</div></div>
-                        <div class="stat-card"><div class="stat-number">$${stats.partInvestisseurs.toFixed(2)}</div><div>Part investisseurs</div></div>
+                        <div class="stat-card"><div class="stat-number">$${stats.partInvestisseursTotal.toFixed(2)}</div><div>Part investisseurs (total)</div></div>
                         <div class="stat-card"><div class="stat-number">$${stats.balanceNet.toFixed(2)}</div><div>Balance nette</div></div>
                     </div>
                     <canvas id="adminStatsChart" width="400" height="200"></canvas>
@@ -324,7 +353,7 @@
             } else if (adminCurrentView === "users") {
                 mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>👥 Gestion des utilisateurs</h2><div class="form-grid"><div class="form-group"><label>Nom / Bureau</label><input type="text" id="newUserName"></div><div class="form-group"><label>Adresse complète</label><input type="text" id="newUserAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="newUserEmail"></div><div class="form-group"><label>Rôle</label><select id="newUserRole"><option value="receveur">Receveur</option><option value="livreur">Livreur</option><option value="superviseur">Superviseur</option><option value="investisseur">Investisseur</option></select></div><div class="form-group"><label>Code</label><input type="text" id="newUserCode"></div></div><button id="addUserBtn">➕ Créer</button><div id="usersList" class="card-list"></div>`;
             } else if (adminCurrentView === "investisseurs") {
-                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>💰 Gestion des investisseurs</h2><div class="form-grid"><div class="form-group"><label>Nom complet</label><input type="text" id="invNom"></div><div class="form-group"><label>Adresse</label><input type="text" id="invAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="invEmail"></div><div class="form-group"><label>Téléphone 1</label><input type="tel" id="invTel1"></div><div class="form-group"><label>Téléphone 2</label><input type="tel" id="invTel2"></div><div class="form-group"><label>Pourcentage (%)</label><input type="number" id="invPourc" step="0.1"></div></div><button id="addInvestisseurBtn">➕ Ajouter investisseur</button><div id="investisseursList" class="card-list"></div>`;
+                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>💰 Gestion des investisseurs</h2><div class="form-grid"><div class="form-group"><label>Nom complet</label><input type="text" id="invNom"></div><div class="form-group"><label>Adresse</label><input type="text" id="invAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="invEmail"></div><div class="form-group"><label>Téléphone 1</label><input type="tel" id="invTel1"></div><div class="form-group"><label>Téléphone 2</label><input type="tel" id="invTel2"></div><div class="form-group"><label>Pourcentage (%)</label><input type="number" id="invPourc" step="0.1"></div><div class="form-group"><label>Durée (mois)</label><input type="number" id="invDuree" step="1" value="12"></div></div><button id="addInvestisseurBtn">➕ Ajouter investisseur</button><div id="investisseursList" class="card-list"></div>`;
             } else if (adminCurrentView === "settings") {
                 mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🏢 Configuration</h2><div class="form-grid"><div class="form-group"><label>Nom entreprise</label><input type="text" id="companyName" value="${appData.company.name}"></div><div class="form-group"><label>Logo</label><input type="file" id="companyLogoUpload" accept="image/*"><button id="applyLogoBtn" class="btn-secondary">Appliquer</button><div id="currentLogoPreview" style="margin-top:8px;">${appData.company.logo ? `<img src="${appData.company.logo}" style="max-height:60px;">` : 'Aucun logo'}</div></div><div class="form-group"><label>Taux USD→HTG</label><input type="number" id="tauxChange" step="1" value="${appData.company.tauxUSDToHTG}"><button id="saveTauxBtn">Enregistrer</button></div><div class="form-group"><label>Prix par livre (USD)</label><input type="number" id="prixParLivre" step="0.1" value="${appData.company.prixParLivre}"></div><div class="form-group"><label>Frais fixe (USD)</label><input type="number" id="fraisFixe" step="0.5" value="${appData.company.fraisFixe}"></div><button id="saveTarifsBtn" class="btn-secondary">Enregistrer tarifs</button></div><h3>📜 Historique des notifications</h3><div id="notificationsHistory" style="max-height:300px; overflow-y:auto; background:#f9f9ff; border-radius:20px; padding:12px; margin-top:15px;"></div>`;
             } else if (adminCurrentView === "search") {
@@ -352,14 +381,14 @@
             </div>
         `;
 
-        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE (toute la logique métier avec API) ==========
+        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE (avec IDs corrigés) ==========
         if (isReceveur) {
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
             destSelect.innerHTML = '<option value="">-- Sélectionner --</option>';
             livreurs.forEach(l => {
                 const opt = document.createElement('option');
-                opt.value = l.id;
+                opt.value = l._id;
                 opt.textContent = `${l.bureauNom} - ${l.adresse || 'Adresse non renseignée'}`;
                 destSelect.appendChild(opt);
             });
@@ -391,11 +420,11 @@
             async function afficherColisReceveur() {
                 const container = document.getElementById('colisListReceveur');
                 if (!container) return;
-                const mesColis = appData.colis.filter(c => c.bureauEnvoiId === currentUser.id);
+                const mesColis = appData.colis.filter(c => c.bureauEnvoiId === currentUser._id);
                 if (mesColis.length === 0) { container.innerHTML = '<div>Aucun colis.</div>'; return; }
                 container.innerHTML = '';
                 for (const c of mesColis) {
-                    const livreur = appData.users.find(u => u.id === c.bureauLivreurId);
+                    const livreur = appData.users.find(u => u._id === c.bureauLivreurId);
                     const adresseLivreur = livreur ? livreur.adresse : 'Adresse inconnue';
                     const statutAff = c.confirme ? (c.statut === 'En transit' ? 'En transit' : c.statut) : 'En attente confirmation';
                     const badgeClass = c.confirme ? (c.statut === 'En transit' ? 'status-transit' : 'status-arrive') : 'status-attente';
@@ -454,10 +483,10 @@
                 const prixUsd = calculerPrixTotalUSD(poidsLivre);
                 const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
                 const tracking = genTracking();
-                const livreurUser = appData.users.find(u => u.id === destLivreurId);
+                const livreurUser = appData.users.find(u => u._id === destLivreurId);
                 const newColis = {
                     numeroSuivi: tracking,
-                    bureauEnvoiId: currentUser.id,
+                    bureauEnvoiId: currentUser._id,
                     bureauEnvoiNom: currentUser.bureauNom,
                     bureauLivreurId: destLivreurId,
                     bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
@@ -483,7 +512,7 @@
         if (isLivreur) {
             async function refreshLivraison() {
                 const searchTerm = document.getElementById('searchLivraisonNom')?.value.trim().toLowerCase() || '';
-                let filtres = appData.colis.filter(c => c.bureauLivreurId === currentUser.id && c.confirme === true);
+                let filtres = appData.colis.filter(c => c.bureauLivreurId === currentUser._id && c.confirme === true);
                 if (searchTerm) filtres = filtres.filter(c => c.destinataire.nom.toLowerCase().includes(searchTerm));
                 const container = document.getElementById('livraisonResults');
                 if (!container) return;
@@ -607,21 +636,22 @@
             renderColisAttente();
         }
 
-        if (isInvestisseur) {
-            const stats = getAdvancedStats();
+        if (isInvestisseur && investisseurActuel) {
+            const stats = getInvestisseurStats(investisseurActuel);
             const ctx = document.getElementById('investisseurChart')?.getContext('2d');
             if (ctx) {
                 new Chart(ctx, {
                     type: 'bar',
-                    data: { labels: ['Total colis', 'Livrés', 'En transit', 'Arrivés non livrés'], datasets: [{ label: 'Nombre', data: [stats.colisTotal, stats.colisLivres, stats.colisEnTransit, stats.colisArrives], backgroundColor: ['#1e4a76', '#2b6e3c', '#f59e0b', '#ef4444'] }] }
+                    data: { labels: ['Total colis', 'Votre part (USD)', 'Balance nette'], datasets: [{ label: 'Montants', data: [stats.colisTotal, stats.partIndividuelle, stats.balanceNet], backgroundColor: ['#1e4a76', '#2b6e3c', '#f59e0b'] }] }
                 });
             }
             async function afficherColisInvestisseur() {
                 const container = document.getElementById('globalColisInvestisseur');
                 if (!container) return;
-                if (appData.colis.length === 0) { container.innerHTML = '<div>Aucun colis</div>'; return; }
+                const derniersColis = appData.colis.slice(0, 20);
+                if (derniersColis.length === 0) { container.innerHTML = '<div>Aucun colis</div>'; return; }
                 container.innerHTML = '';
-                for (const c of appData.colis) {
+                for (const c of derniersColis) {
                     const statutAff = c.confirme ? (c.statut === 'En transit' ? 'En transit' : c.statut) : 'En attente confirmation';
                     const badgeClass = c.confirme ? (c.statut === 'En transit' ? 'status-transit' : 'status-arrive') : 'status-attente';
                     const div = document.createElement('div');
@@ -720,9 +750,11 @@
                     if (!container) return;
                     container.innerHTML = '';
                     for (const inv of appData.investisseurs) {
+                        const dateFin = new Date(inv.dateDebut);
+                        dateFin.setMonth(dateFin.getMonth() + (inv.dureeMois || 0));
                         const card = document.createElement('div');
                         card.className = 'colis-card';
-                        card.innerHTML = `<div class="flex-row"><div><strong>${inv.nom}</strong><br>Adresse: ${inv.adresse}<br>Email: ${inv.email}<br>Tel1: ${inv.telephone1}<br>Tel2: ${inv.telephone2 || '-'}<br>Pourcentage: ${inv.pourcentage}%</div><button class="btn-danger" data-id="${inv._id}">🗑️</button></div>`;
+                        card.innerHTML = `<div class="flex-row"><div><strong>${inv.nom}</strong><br>Adresse: ${inv.adresse}<br>Email: ${inv.email}<br>Tel1: ${inv.telephone1}<br>Tel2: ${inv.telephone2 || '-'}<br>Pourcentage: ${inv.pourcentage}%<br>Durée: ${inv.dureeMois} mois (jusqu'au ${dateFin.toLocaleDateString()})</div><button class="btn-danger" data-id="${inv._id}">🗑️</button></div>`;
                         container.appendChild(card);
                     }
                     document.querySelectorAll('.btn-danger[data-id]').forEach(btn => {
@@ -743,12 +775,13 @@
                     const tel1 = document.getElementById('invTel1').value.trim();
                     const tel2 = document.getElementById('invTel2').value.trim();
                     const pourc = parseFloat(document.getElementById('invPourc').value);
-                    if (!nom || !adresse || !email || !tel1 || isNaN(pourc)) { showNotification("Tous les champs requis", "error"); return; }
-                    const newInv = { nom, adresse, email, telephone1: tel1, telephone2: tel2, pourcentage: pourc };
+                    const duree = parseInt(document.getElementById('invDuree').value, 10);
+                    if (!nom || !adresse || !email || !tel1 || isNaN(pourc) || isNaN(duree)) { showNotification("Tous les champs requis", "error"); return; }
+                    const newInv = { nom, adresse, email, telephone1: tel1, telephone2: tel2, pourcentage: pourc, dureeMois: duree, dateDebut: new Date() };
                     await apiRequest('/investisseurs', 'POST', newInv);
                     await loadAllData();
                     renderInvestisseursList();
-                    document.getElementById('invNom').value = ''; document.getElementById('invAdresse').value = ''; document.getElementById('invEmail').value = ''; document.getElementById('invTel1').value = ''; document.getElementById('invTel2').value = ''; document.getElementById('invPourc').value = '';
+                    document.getElementById('invNom').value = ''; document.getElementById('invAdresse').value = ''; document.getElementById('invEmail').value = ''; document.getElementById('invTel1').value = ''; document.getElementById('invTel2').value = ''; document.getElementById('invPourc').value = ''; document.getElementById('invDuree').value = '12';
                     showNotification(`Investisseur ${nom} ajouté`, "success");
                 });
             }
@@ -787,11 +820,17 @@
                         render();
                     } else showNotification("Sélectionnez une image", "error");
                 });
-                document.getElementById('companyName')?.addEventListener('change', async (e) => {
-                    await apiRequest('/company', 'PUT', { name: e.target.value });
-                    await loadAllData();
-                    render();
-                });
+                // Suppression de l'écouteur change sur companyName pour éviter les appels intempestifs
+                const companyNameInput = document.getElementById('companyName');
+                if (companyNameInput) {
+                    companyNameInput.removeEventListener('change', null);
+                    companyNameInput.addEventListener('blur', async (e) => {
+                        await apiRequest('/company', 'PUT', { name: e.target.value });
+                        await loadAllData();
+                        showNotification("Nom mis à jour", "success");
+                        render();
+                    });
+                }
             }
 
             if (adminCurrentView === "search") {

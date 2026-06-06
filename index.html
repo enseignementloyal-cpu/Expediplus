@@ -18,6 +18,7 @@
         .rate-badge { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; padding: 8px 20px; border-radius: 40px; font-weight: 600; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
         button { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; border: none; padding: 10px 22px; border-radius: 40px; font-weight: 600; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
         button:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.15); background: linear-gradient(135deg, #163157, #1f3f6b); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
         .btn-secondary { background: linear-gradient(135deg, #4b6e8a, #3a5a74); }
         .btn-danger { background: linear-gradient(135deg, #b91c1c, #991b1b); }
         .btn-success { background: linear-gradient(135deg, #2b6e3c, #1f5a2e); }
@@ -91,12 +92,13 @@
     let currentUser = null;
     let adminCurrentView = "dashboard";
     let statsChart = null;
+    let dataLoaded = false; // pour ne charger qu'une fois
 
-    // Mise à jour locale sans appel réseau
+    // Mise à jour locale
     function updateLocalCompany(newCompany) { appData.company = { ...appData.company, ...newCompany }; }
     function addLocalUser(user) { appData.users.push(user); }
     function deleteLocalUser(userId) { appData.users = appData.users.filter(u => u._id !== userId); }
-    function addLocalColis(colis) { appData.colis.unshift(colis); } // nouveau en premier
+    function addLocalColis(colis) { appData.colis.unshift(colis); }
     function updateLocalColis(colisId, updates) {
         const index = appData.colis.findIndex(c => c._id === colisId);
         if (index !== -1) appData.colis[index] = { ...appData.colis[index], ...updates };
@@ -106,10 +108,9 @@
     function deleteLocalInvestisseur(invId) { appData.investisseurs = appData.investisseurs.filter(i => i._id !== invId); }
     function addLocalNotification(notif) { appData.notifications.unshift(notif); }
 
-    // ========== CHARGEMENT UNIQUE AU DÉMARRAGE ==========
-    let dataLoaded = false;
+    // ========== CHARGEMENT UNIQUE ==========
     async function loadAllData() {
-        if (dataLoaded) return; // déjà chargé une fois
+        if (dataLoaded) return;
         try {
             const [company, users, colis, investisseurs, notifications] = await Promise.all([
                 apiRequest('/company').catch(() => null),
@@ -140,7 +141,6 @@
         notifDiv.appendChild(toast);
         toast.querySelector('button').onclick = () => toast.remove();
         setTimeout(() => toast.remove(), 5000);
-        // Ajout local de la notification
         addLocalNotification({ message, type, date: new Date().toISOString() });
     }
 
@@ -158,6 +158,33 @@
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
             reader.readAsDataURL(file);
+        });
+    }
+
+    // Compression d'image pour envoi rapide
+    async function compressImage(file, maxWidth, quality) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+                    resolve(compressedBase64);
+                };
+            };
         });
     }
 
@@ -217,7 +244,7 @@
         win.print();
     }
 
-    // ========== RENDU PRINCIPAL (sans rechargement réseau) ==========
+    // ========== RENDU PRINCIPAL ==========
     async function render() {
         const root = document.getElementById('appRoot');
         if (!currentUser) {
@@ -237,7 +264,7 @@
                     const user = await apiRequest('/auth/login', 'POST', { code });
                     if (user) {
                         currentUser = user;
-                        await loadAllData(); // premier chargement global
+                        await loadAllData();
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
                     } else throw new Error("Code invalide");
@@ -249,7 +276,6 @@
             return;
         }
 
-        // Pas de rechargement réseau ici -> on utilise le cache local
         const isAdmin = (currentUser.role === 'admin');
         const isReceveur = (currentUser.role === 'receveur');
         const isLivreur = (currentUser.role === 'livreur');
@@ -391,7 +417,7 @@
             </div>
         `;
 
-        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE (sans refetch global) ==========
+        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE ==========
         if (isReceveur) {
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
@@ -482,50 +508,72 @@
                 showNotification("Données rafraîchies", "success");
             });
 
+            // Formulaire avec compression et indicateur
             const formEnvoi = document.getElementById('formEnvoi');
+            let isSubmitting = false;
             formEnvoi.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const destLivreurId = destSelect.value;
-                if (!destLivreurId) { showNotification("Choisissez un bureau livreur", "error"); return; }
-                const expediteur = document.getElementById('expediteurNom').value.trim();
-                const destNom = document.getElementById('destinataireNom').value.trim();
-                const adresse = document.getElementById('destinataireAdresse').value.trim();
-                const tel = document.getElementById('destinataireTel').value.trim();
-                const cni = document.getElementById('destinataireCni').value.trim();
-                const poidsLivre = parseFloat(poidsField.value);
-                if (!expediteur || !destNom || !adresse || isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("Champs obligatoires", "error"); return; }
-                let photoBase64 = null;
-                if (photoInput.files.length) photoBase64 = await readFileAsBase64(photoInput.files[0]);
-                const prixUsd = calculerPrixTotalUSD(poidsLivre);
-                const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
-                const tracking = genTracking();
-                const livreurUser = appData.users.find(u => u._id === destLivreurId);
-                const newColis = {
-                    numeroSuivi: tracking,
-                    bureauEnvoiId: currentUser._id,
-                    bureauEnvoiNom: currentUser.bureauNom,
-                    bureauLivreurId: destLivreurId,
-                    bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
-                    expediteurNom: expediteur,
-                    destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
-                    poidsLivre: poidsLivre,
-                    prixUsd: prixUsd,
-                    prixGourdes: prixGourdes,
-                    photoColis: photoBase64,
-                    confirme: false,
-                    statut: "En attente",
-                    paiement: { effectue: false }
-                };
+                if (isSubmitting) return;
+                isSubmitting = true;
+                const submitBtn = formEnvoi.querySelector('button[type="submit"]');
+                const originalText = submitBtn.textContent;
+                submitBtn.textContent = "⏳ Envoi en cours...";
+                submitBtn.disabled = true;
                 try {
+                    const destLivreurId = destSelect.value;
+                    if (!destLivreurId) { showNotification("Choisissez un bureau livreur", "error"); return; }
+                    const expediteur = document.getElementById('expediteurNom').value.trim();
+                    const destNom = document.getElementById('destinataireNom').value.trim();
+                    const adresse = document.getElementById('destinataireAdresse').value.trim();
+                    const tel = document.getElementById('destinataireTel').value.trim();
+                    const cni = document.getElementById('destinataireCni').value.trim();
+                    const poidsLivre = parseFloat(poidsField.value);
+                    if (!expediteur || !destNom || !adresse || isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("Champs obligatoires", "error"); return; }
+                    
+                    let photoBase64 = null;
+                    if (photoInput.files.length) {
+                        const file = photoInput.files[0];
+                        photoBase64 = await compressImage(file, 800, 0.7); // compression rapide
+                    }
+                    
+                    const prixUsd = calculerPrixTotalUSD(poidsLivre);
+                    const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
+                    const tracking = genTracking();
+                    const livreurUser = appData.users.find(u => u._id === destLivreurId);
+                    
+                    const newColis = {
+                        numeroSuivi: tracking,
+                        bureauEnvoiId: currentUser._id,
+                        bureauEnvoiNom: currentUser.bureauNom,
+                        bureauLivreurId: destLivreurId,
+                        bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
+                        expediteurNom: expediteur,
+                        destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
+                        poidsLivre: poidsLivre,
+                        prixUsd: prixUsd,
+                        prixGourdes: prixGourdes,
+                        photoColis: photoBase64,
+                        confirme: false,
+                        statut: "En attente",
+                        paiement: { effectue: false }
+                    };
+                    
                     const saved = await apiRequest('/colis', 'POST', newColis);
                     addLocalColis(saved);
-                    showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "info");
+                    showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "success");
                     formContainer.style.display = 'none';
                     showFormBtn.style.display = 'inline-flex';
                     formEnvoi.reset();
                     document.getElementById('previewPhotoColis').innerHTML = '';
                     afficherColisReceveur();
-                } catch (err) { showNotification("Erreur création", "error"); }
+                } catch (err) {
+                    console.error(err);
+                    showNotification("Erreur lors de l'enregistrement: " + (err.message || "Vérifiez votre connexion"), "error");
+                } finally {
+                    isSubmitting = false;
+                    submitBtn.textContent = originalText;
+                    submitBtn.disabled = false;
+                }
             });
         }
 
@@ -893,7 +941,7 @@
         document.getElementById('logoutBtn')?.addEventListener('click', () => { currentUser = null; adminCurrentView = "dashboard"; dataLoaded = false; render(); });
     }
 
-    // Démarrage : on charge les données UNE SEULE FOIS puis on rend
+    // Démarrage
     loadAllData().then(() => render());
 </script>
 </body>

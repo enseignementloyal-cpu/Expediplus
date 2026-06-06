@@ -7,7 +7,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        /* ========== STYLES (inchangés) ========== */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { background: linear-gradient(145deg, #f6f9fc 0%, #eef2f7 100%); min-height: 100vh; padding: 24px; position: relative; }
         @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -69,8 +68,8 @@
 <div id="appRoot"><div class="loader">Chargement de l'application...</div></div>
 
 <script>
-    // ========== CONNEXION À L'API BACKEND ==========
-    const API_BASE = '/api';  // Utilisation relative (même serveur)
+    // ========== CONNEXION API ==========
+    const API_BASE = '/api';
 
     async function apiRequest(endpoint, method = 'GET', body = null) {
         const options = { method, headers: { 'Content-Type': 'application/json' } };
@@ -81,7 +80,7 @@
         return await response.json();
     }
 
-    // ========== ÉTAT GLOBAL ==========
+    // ========== CACHE LOCAL & ÉTAT ==========
     let appData = {
         company: { name: "Ship'Log Express", logo: "", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5 },
         users: [],
@@ -93,7 +92,45 @@
     let adminCurrentView = "dashboard";
     let statsChart = null;
 
-    // ========== FONCTIONS UTILITAIRES ==========
+    // Mise à jour locale sans appel réseau
+    function updateLocalCompany(newCompany) { appData.company = { ...appData.company, ...newCompany }; }
+    function addLocalUser(user) { appData.users.push(user); }
+    function deleteLocalUser(userId) { appData.users = appData.users.filter(u => u._id !== userId); }
+    function addLocalColis(colis) { appData.colis.unshift(colis); } // nouveau en premier
+    function updateLocalColis(colisId, updates) {
+        const index = appData.colis.findIndex(c => c._id === colisId);
+        if (index !== -1) appData.colis[index] = { ...appData.colis[index], ...updates };
+    }
+    function deleteLocalColis(colisId) { appData.colis = appData.colis.filter(c => c._id !== colisId); }
+    function addLocalInvestisseur(inv) { appData.investisseurs.push(inv); }
+    function deleteLocalInvestisseur(invId) { appData.investisseurs = appData.investisseurs.filter(i => i._id !== invId); }
+    function addLocalNotification(notif) { appData.notifications.unshift(notif); }
+
+    // ========== CHARGEMENT UNIQUE AU DÉMARRAGE ==========
+    let dataLoaded = false;
+    async function loadAllData() {
+        if (dataLoaded) return; // déjà chargé une fois
+        try {
+            const [company, users, colis, investisseurs, notifications] = await Promise.all([
+                apiRequest('/company').catch(() => null),
+                apiRequest('/users').catch(() => []),
+                apiRequest('/colis').catch(() => []),
+                apiRequest('/investisseurs').catch(() => []),
+                apiRequest('/notifications').catch(() => [])
+            ]);
+            if (company) appData.company = company;
+            appData.users = users;
+            appData.colis = colis;
+            appData.investisseurs = investisseurs;
+            appData.notifications = notifications;
+            dataLoaded = true;
+        } catch (err) {
+            console.error("Erreur chargement initial", err);
+            showNotification("Impossible de charger les données depuis le serveur.", "error");
+        }
+    }
+
+    // ========== UTILITAIRES ==========
     function showNotification(message, type = 'info') {
         const notifDiv = document.getElementById('global-notification-area');
         if (!notifDiv) return;
@@ -103,7 +140,8 @@
         notifDiv.appendChild(toast);
         toast.querySelector('button').onclick = () => toast.remove();
         setTimeout(() => toast.remove(), 5000);
-        apiRequest('/notifications', 'POST', { message, type }).catch(e => console.warn);
+        // Ajout local de la notification
+        addLocalNotification({ message, type, date: new Date().toISOString() });
     }
 
     function calculerPrixTotalUSD(poidsLivre) {
@@ -123,7 +161,6 @@
         });
     }
 
-    // Calcul des parts pour tous les investisseurs (ou un seul)
     function calculerPartInvestisseur(montantUSD, pourcentage) {
         return (montantUSD * pourcentage / 100);
     }
@@ -146,7 +183,6 @@
         return { colisTotal, colisLivres, colisEnAttenteConf, colisEnTransit, colisArrives, totalEntreesUSD, partInvestisseursTotal, balanceNet };
     }
 
-    // Statistiques pour un investisseur spécifique
     function getInvestisseurStats(investisseur) {
         const global = getAdvancedStats();
         const partIndividuelle = calculerPartInvestisseur(global.totalEntreesUSD, investisseur.pourcentage);
@@ -181,28 +217,7 @@
         win.print();
     }
 
-    // ========== CHARGEMENT DES DONNÉES DEPUIS L'API ==========
-    async function loadAllData() {
-        try {
-            const [company, users, colis, investisseurs, notifications] = await Promise.all([
-                apiRequest('/company').catch(() => null),
-                apiRequest('/users').catch(() => []),
-                apiRequest('/colis').catch(() => []),
-                apiRequest('/investisseurs').catch(() => []),
-                apiRequest('/notifications').catch(() => [])
-            ]);
-            if (company) appData.company = company;
-            appData.users = users;
-            appData.colis = colis;
-            appData.investisseurs = investisseurs;
-            appData.notifications = notifications;
-        } catch (err) {
-            console.error("Erreur chargement initial", err);
-            showNotification("Impossible de charger les données depuis le serveur.", "error");
-        }
-    }
-
-    // ========== RENDU PRINCIPAL ==========
+    // ========== RENDU PRINCIPAL (sans rechargement réseau) ==========
     async function render() {
         const root = document.getElementById('appRoot');
         if (!currentUser) {
@@ -222,7 +237,7 @@
                     const user = await apiRequest('/auth/login', 'POST', { code });
                     if (user) {
                         currentUser = user;
-                        await loadAllData();
+                        await loadAllData(); // premier chargement global
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
                     } else throw new Error("Code invalide");
@@ -234,22 +249,16 @@
             return;
         }
 
-        await loadAllData(); // rafraîchit les données
-
+        // Pas de rechargement réseau ici -> on utilise le cache local
         const isAdmin = (currentUser.role === 'admin');
         const isReceveur = (currentUser.role === 'receveur');
         const isLivreur = (currentUser.role === 'livreur');
         const isSuperviseur = (currentUser.role === 'superviseur');
         const isInvestisseur = (currentUser.role === 'investisseur');
 
-        // Trouver l'investisseur correspondant (si le user est investisseur)
         let investisseurActuel = null;
         if (isInvestisseur) {
-            investisseurActuel = appData.investisseurs.find(inv => inv.email === currentUser.email);
-            if (!investisseurActuel) {
-                // Sinon, essayer par nom (fallback)
-                investisseurActuel = appData.investisseurs.find(inv => inv.nom === currentUser.nom);
-            }
+            investisseurActuel = appData.investisseurs.find(inv => inv.email === currentUser.email) || appData.investisseurs.find(inv => inv.nom === currentUser.nom);
         }
 
         let mainHtml = "";
@@ -258,6 +267,7 @@
                 <div class="flex-row" style="margin-bottom:24px;">
                     <h2>📦 Mes colis</h2>
                     <button id="showFormBtn" class="btn-success">➕ Nouveau colis</button>
+                    <button id="refreshLocalBtn" class="btn-outline">🔄 Rafraîchir</button>
                 </div>
                 <div id="colisListReceveur" class="card-list"></div>
                 <div id="formContainer" style="display:none; margin-top:28px; border-top:2px solid #e2e8f0; padding-top:24px;">
@@ -381,7 +391,7 @@
             </div>
         `;
 
-        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE (avec IDs corrigés) ==========
+        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE (sans refetch global) ==========
         if (isReceveur) {
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
@@ -417,7 +427,7 @@
             poidsField.addEventListener('input', updatePrix);
             updatePrix();
 
-            async function afficherColisReceveur() {
+            function afficherColisReceveur() {
                 const container = document.getElementById('colisListReceveur');
                 if (!container) return;
                 const mesColis = appData.colis.filter(c => c.bureauEnvoiId === currentUser._id);
@@ -465,6 +475,12 @@
             const cancelBtn = document.getElementById('cancelFormBtn');
             showFormBtn.onclick = () => { formContainer.style.display = 'block'; showFormBtn.style.display = 'none'; };
             cancelBtn.onclick = () => { formContainer.style.display = 'none'; showFormBtn.style.display = 'inline-flex'; document.getElementById('formEnvoi').reset(); document.getElementById('previewPhotoColis').innerHTML = ''; };
+            document.getElementById('refreshLocalBtn')?.addEventListener('click', async () => {
+                const freshColis = await apiRequest('/colis');
+                appData.colis = freshColis;
+                afficherColisReceveur();
+                showNotification("Données rafraîchies", "success");
+            });
 
             const formEnvoi = document.getElementById('formEnvoi');
             formEnvoi.addEventListener('submit', async (e) => {
@@ -501,10 +517,14 @@
                     paiement: { effectue: false }
                 };
                 try {
-                    await apiRequest('/colis', 'POST', newColis);
+                    const saved = await apiRequest('/colis', 'POST', newColis);
+                    addLocalColis(saved);
                     showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "info");
-                    await loadAllData();
-                    render();
+                    formContainer.style.display = 'none';
+                    showFormBtn.style.display = 'inline-flex';
+                    formEnvoi.reset();
+                    document.getElementById('previewPhotoColis').innerHTML = '';
+                    afficherColisReceveur();
                 } catch (err) { showNotification("Erreur création", "error"); }
             });
         }
@@ -555,8 +575,8 @@
                         const colis = appData.colis.find(c => c._id === id);
                         if (colis && colis.statut === 'En transit') {
                             await apiRequest(`/colis/${id}`, 'PUT', { statut: 'Arrivé' });
+                            updateLocalColis(id, { statut: 'Arrivé' });
                             showNotification(`Colis ${colis.numeroSuivi} marqué arrivé`, "info");
-                            await loadAllData();
                             refreshLivraison();
                         }
                     });
@@ -578,8 +598,8 @@
                         if (isNaN(montant) || montant <= 0) { showNotification("Montant invalide", "error"); return; }
                         const paiement = { effectue: true, montantRecu: montant, devise, moyen, photoCNI: cniBase64, photoColisLivraison: photoLivBase64 };
                         await apiRequest(`/colis/${id}`, 'PUT', { paiement, statut: 'Livré', dateLivraison: new Date().toISOString() });
+                        updateLocalColis(id, { paiement, statut: 'Livré', dateLivraison: new Date().toISOString() });
                         showNotification(`✅ Colis ${colis.numeroSuivi} livré et payé (${montant} ${devise})`, "success");
-                        await loadAllData();
                         refreshLivraison();
                     });
                 });
@@ -626,8 +646,8 @@
                         const colis = appData.colis.find(c => c._id === id);
                         if (colis && !colis.confirme) {
                             await apiRequest(`/colis/${id}`, 'PUT', { confirme: true, statut: "En transit" });
+                            updateLocalColis(id, { confirme: true, statut: "En transit" });
                             showNotification(`Colis ${colis.numeroSuivi} confirmé et mis en transit`, "success");
-                            await loadAllData();
                             renderColisAttente();
                         }
                     });
@@ -645,7 +665,7 @@
                     data: { labels: ['Total colis', 'Votre part (USD)', 'Balance nette'], datasets: [{ label: 'Montants', data: [stats.colisTotal, stats.partIndividuelle, stats.balanceNet], backgroundColor: ['#1e4a76', '#2b6e3c', '#f59e0b'] }] }
                 });
             }
-            async function afficherColisInvestisseur() {
+            function afficherColisInvestisseur() {
                 const container = document.getElementById('globalColisInvestisseur');
                 if (!container) return;
                 const derniersColis = appData.colis.slice(0, 20);
@@ -677,7 +697,6 @@
         }
 
         if (isAdmin) {
-            // Gestion dashboard
             document.querySelectorAll('.dashboard-card').forEach(card => {
                 card.addEventListener('click', () => {
                     const view = card.getAttribute('data-view');
@@ -721,7 +740,7 @@
                         btn.addEventListener('click', async () => {
                             const id = btn.getAttribute('data-id');
                             await apiRequest(`/users/${id}`, 'DELETE');
-                            await loadAllData();
+                            deleteLocalUser(id);
                             renderUsersList();
                             showNotification("Utilisateur supprimé", "info");
                         });
@@ -736,8 +755,8 @@
                     const code = document.getElementById('newUserCode').value.trim();
                     if (!nom || !code) { showNotification("Nom et code requis", "error"); return; }
                     const newUser = { nom, bureauNom: nom, adresse, email, role, code };
-                    await apiRequest('/users', 'POST', newUser);
-                    await loadAllData();
+                    const created = await apiRequest('/users', 'POST', newUser);
+                    addLocalUser(created);
                     renderUsersList();
                     document.getElementById('newUserName').value = ''; document.getElementById('newUserAdresse').value = ''; document.getElementById('newUserEmail').value = ''; document.getElementById('newUserCode').value = '';
                     showNotification(`Utilisateur ${nom} créé`, "success");
@@ -761,7 +780,7 @@
                         btn.addEventListener('click', async () => {
                             const id = btn.getAttribute('data-id');
                             await apiRequest(`/investisseurs/${id}`, 'DELETE');
-                            await loadAllData();
+                            deleteLocalInvestisseur(id);
                             renderInvestisseursList();
                             showNotification("Investisseur supprimé", "info");
                         });
@@ -778,8 +797,8 @@
                     const duree = parseInt(document.getElementById('invDuree').value, 10);
                     if (!nom || !adresse || !email || !tel1 || isNaN(pourc) || isNaN(duree)) { showNotification("Tous les champs requis", "error"); return; }
                     const newInv = { nom, adresse, email, telephone1: tel1, telephone2: tel2, pourcentage: pourc, dureeMois: duree, dateDebut: new Date() };
-                    await apiRequest('/investisseurs', 'POST', newInv);
-                    await loadAllData();
+                    const created = await apiRequest('/investisseurs', 'POST', newInv);
+                    addLocalInvestisseur(created);
                     renderInvestisseursList();
                     document.getElementById('invNom').value = ''; document.getElementById('invAdresse').value = ''; document.getElementById('invEmail').value = ''; document.getElementById('invTel1').value = ''; document.getElementById('invTel2').value = ''; document.getElementById('invPourc').value = ''; document.getElementById('invDuree').value = '12';
                     showNotification(`Investisseur ${nom} ajouté`, "success");
@@ -795,8 +814,8 @@
                     const prix = parseFloat(document.getElementById('prixParLivre').value);
                     const frais = parseFloat(document.getElementById('fraisFixe').value);
                     if (!isNaN(prix) && prix >= 0 && !isNaN(frais) && frais >= 0) {
-                        await apiRequest('/company', 'PUT', { prixParLivre: prix, fraisFixe: frais });
-                        await loadAllData();
+                        const updated = await apiRequest('/company', 'PUT', { prixParLivre: prix, fraisFixe: frais });
+                        updateLocalCompany(updated);
                         showNotification("Tarifs mis à jour", "success");
                         render();
                     } else showNotification("Valeurs invalides", "error");
@@ -804,8 +823,8 @@
                 document.getElementById('saveTauxBtn')?.addEventListener('click', async () => {
                     const newTaux = parseFloat(document.getElementById('tauxChange').value);
                     if (!isNaN(newTaux) && newTaux > 0) {
-                        await apiRequest('/company', 'PUT', { tauxUSDToHTG: newTaux });
-                        await loadAllData();
+                        const updated = await apiRequest('/company', 'PUT', { tauxUSDToHTG: newTaux });
+                        updateLocalCompany(updated);
                         showNotification("Taux mis à jour", "success");
                         render();
                     }
@@ -814,19 +833,17 @@
                     const logoFile = document.getElementById('companyLogoUpload').files[0];
                     if (logoFile) {
                         const base64 = await readFileAsBase64(logoFile);
-                        await apiRequest('/company', 'PUT', { logo: base64 });
-                        await loadAllData();
+                        const updated = await apiRequest('/company', 'PUT', { logo: base64 });
+                        updateLocalCompany(updated);
                         showNotification("Logo modifié", "success");
                         render();
                     } else showNotification("Sélectionnez une image", "error");
                 });
-                // Suppression de l'écouteur change sur companyName pour éviter les appels intempestifs
                 const companyNameInput = document.getElementById('companyName');
                 if (companyNameInput) {
-                    companyNameInput.removeEventListener('change', null);
                     companyNameInput.addEventListener('blur', async (e) => {
-                        await apiRequest('/company', 'PUT', { name: e.target.value });
-                        await loadAllData();
+                        const updated = await apiRequest('/company', 'PUT', { name: e.target.value });
+                        updateLocalCompany(updated);
                         showNotification("Nom mis à jour", "success");
                         render();
                     });
@@ -834,7 +851,7 @@
             }
 
             if (adminCurrentView === "search") {
-                async function afficherGlobalColis(filtre = '') {
+                function afficherGlobalColis(filtre = '') {
                     const container = document.getElementById('globalColisContainer');
                     if (!container) return;
                     let data = [...appData.colis];
@@ -873,10 +890,10 @@
             }
         }
 
-        document.getElementById('logoutBtn')?.addEventListener('click', () => { currentUser = null; adminCurrentView = "dashboard"; render(); });
+        document.getElementById('logoutBtn')?.addEventListener('click', () => { currentUser = null; adminCurrentView = "dashboard"; dataLoaded = false; render(); });
     }
 
-    // Démarrage
+    // Démarrage : on charge les données UNE SEULE FOIS puis on rend
     loadAllData().then(() => render());
 </script>
 </body>

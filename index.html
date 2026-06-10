@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Ship'Log Pro - Transport de colis</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        /* (garder le même CSS que précédemment) */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { background: linear-gradient(145deg, #f6f9fc 0%, #eef2f7 100%); min-height: 100vh; padding: 24px; position: relative; }
         @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -18,7 +19,6 @@
         .rate-badge { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; padding: 8px 20px; border-radius: 40px; font-weight: 600; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
         button { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; border: none; padding: 10px 22px; border-radius: 40px; font-weight: 600; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
         button:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.15); background: linear-gradient(135deg, #163157, #1f3f6b); }
-        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
         .btn-secondary { background: linear-gradient(135deg, #4b6e8a, #3a5a74); }
         .btn-danger { background: linear-gradient(135deg, #b91c1c, #991b1b); }
         .btn-success { background: linear-gradient(135deg, #2b6e3c, #1f5a2e); }
@@ -69,7 +69,6 @@
 <div id="appRoot"><div class="loader">Chargement de l'application...</div></div>
 
 <script>
-    // ========== CONNEXION API ==========
     const API_BASE = '/api';
 
     async function apiRequest(endpoint, method = 'GET', body = null) {
@@ -81,9 +80,8 @@
         return await response.json();
     }
 
-    // ========== CACHE LOCAL & ÉTAT ==========
     let appData = {
-        company: { name: "Ship'Log Express", logo: "", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5 },
+        company: { name: "Ship'Log Express", logo: "", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5, superviseurActif: true },
         users: [],
         colis: [],
         investisseurs: [],
@@ -92,9 +90,7 @@
     let currentUser = null;
     let adminCurrentView = "dashboard";
     let statsChart = null;
-    let dataLoaded = false; // pour ne charger qu'une fois
 
-    // Mise à jour locale
     function updateLocalCompany(newCompany) { appData.company = { ...appData.company, ...newCompany }; }
     function addLocalUser(user) { appData.users.push(user); }
     function deleteLocalUser(userId) { appData.users = appData.users.filter(u => u._id !== userId); }
@@ -108,7 +104,7 @@
     function deleteLocalInvestisseur(invId) { appData.investisseurs = appData.investisseurs.filter(i => i._id !== invId); }
     function addLocalNotification(notif) { appData.notifications.unshift(notif); }
 
-    // ========== CHARGEMENT UNIQUE ==========
+    let dataLoaded = false;
     async function loadAllData() {
         if (dataLoaded) return;
         try {
@@ -131,7 +127,6 @@
         }
     }
 
-    // ========== UTILITAIRES ==========
     function showNotification(message, type = 'info') {
         const notifDiv = document.getElementById('global-notification-area');
         if (!notifDiv) return;
@@ -158,33 +153,6 @@
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
             reader.readAsDataURL(file);
-        });
-    }
-
-    // Compression d'image pour envoi rapide
-    async function compressImage(file, maxWidth, quality) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (e) => {
-                const img = new Image();
-                img.src = e.target.result;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > maxWidth) {
-                        height = (height * maxWidth) / width;
-                        width = maxWidth;
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-                    resolve(compressedBase64);
-                };
-            };
         });
     }
 
@@ -244,7 +212,6 @@
         win.print();
     }
 
-    // ========== RENDU PRINCIPAL ==========
     async function render() {
         const root = document.getElementById('appRoot');
         if (!currentUser) {
@@ -252,25 +219,27 @@
                 <div style="max-width:450px; margin:80px auto; background:white; border-radius:60px; padding:40px; text-align:center; box-shadow:0 30px 40px -20px rgba(0,0,0,0.2);">
                     <h2 style="font-size:2rem;">🚢 ${appData.company.name}</h2>
                     ${appData.company.logo ? `<img src="${appData.company.logo}" style="max-width:120px; margin:15px auto;">` : ''}
-                    <p style="margin:20px 0 10px;">Connexion avec votre code personnel</p>
-                    <input type="text" id="loginCode" placeholder="Code d'accès" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;">
+                    <p style="margin:20px 0 10px;">Connexion avec votre identifiant (code ou email) et mot de passe</p>
+                    <input type="text" id="loginIdentifier" placeholder="Code ou email" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;">
+                    <input type="password" id="loginPassword" placeholder="Mot de passe" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;">
                     <button id="loginBtn" style="margin-top:12px;">Se connecter</button>
                     <div id="loginError" style="margin-top:12px; display:none; color:red;"></div>
                 </div>
             `;
             document.getElementById('loginBtn')?.addEventListener('click', async () => {
-                const code = document.getElementById('loginCode').value.trim();
+                const identifier = document.getElementById('loginIdentifier').value.trim();
+                const password = document.getElementById('loginPassword').value;
                 try {
-                    const user = await apiRequest('/auth/login', 'POST', { code });
+                    const user = await apiRequest('/auth/login', 'POST', { identifier, password });
                     if (user) {
                         currentUser = user;
                         await loadAllData();
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
-                    } else throw new Error("Code invalide");
+                    } else throw new Error("Identifiant ou mot de passe incorrect");
                 } catch (err) {
                     document.getElementById('loginError').style.display = 'block';
-                    document.getElementById('loginError').innerText = '❌ Code invalide.';
+                    document.getElementById('loginError').innerText = '❌ Identifiant ou mot de passe incorrect.';
                 }
             });
             return;
@@ -370,7 +339,7 @@
                         <div class="dashboard-card" data-view="stats"><div style="font-size:2.5rem;">📊</div><h3>Tableau de bord</h3><p>Statistiques visuelles</p></div>
                         <div class="dashboard-card" data-view="users"><div style="font-size:2.5rem;">👥</div><h3>Utilisateurs</h3><p>Gérer les comptes</p></div>
                         <div class="dashboard-card" data-view="investisseurs"><div style="font-size:2.5rem;">💰</div><h3>Investisseurs</h3><p>Gérer les parts et durées</p></div>
-                        <div class="dashboard-card" data-view="settings"><div style="font-size:2.5rem;">⚙️</div><h3>Paramètres</h3><p>Entreprise, tarifs</p></div>
+                        <div class="dashboard-card" data-view="settings"><div style="font-size:2.5rem;">⚙️</div><h3>Paramètres</h3><p>Entreprise, tarifs, superviseur</p></div>
                         <div class="dashboard-card" data-view="search"><div style="font-size:2.5rem;">🔍</div><h3>Recherche colis</h3><p>Suivi global</p></div>
                         <div class="dashboard-card" data-view="addresses"><div style="font-size:2.5rem;">🏢</div><h3>Adresses bureaux</h3><p>Voir toutes les adresses</p></div>
                     </div>
@@ -387,11 +356,11 @@
                     <canvas id="adminStatsChart" width="400" height="200"></canvas>
                 `;
             } else if (adminCurrentView === "users") {
-                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>👥 Gestion des utilisateurs</h2><div class="form-grid"><div class="form-group"><label>Nom / Bureau</label><input type="text" id="newUserName"></div><div class="form-group"><label>Adresse complète</label><input type="text" id="newUserAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="newUserEmail"></div><div class="form-group"><label>Rôle</label><select id="newUserRole"><option value="receveur">Receveur</option><option value="livreur">Livreur</option><option value="superviseur">Superviseur</option><option value="investisseur">Investisseur</option></select></div><div class="form-group"><label>Code</label><input type="text" id="newUserCode"></div></div><button id="addUserBtn">➕ Créer</button><div id="usersList" class="card-list"></div>`;
+                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>👥 Gestion des utilisateurs</h2><div class="form-grid"><div class="form-group"><label>Nom / Bureau</label><input type="text" id="newUserName"></div><div class="form-group"><label>Adresse complète</label><input type="text" id="newUserAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="newUserEmail"></div><div class="form-group"><label>Rôle</label><select id="newUserRole"><option value="receveur">Receveur</option><option value="livreur">Livreur</option><option value="superviseur">Superviseur</option><option value="investisseur">Investisseur</option></select></div><div class="form-group"><label>Code / Identifiant</label><input type="text" id="newUserCode"></div><div class="form-group"><label>Mot de passe</label><input type="password" id="newUserPassword"></div></div><button id="addUserBtn">➕ Créer</button><div id="usersList" class="card-list"></div>`;
             } else if (adminCurrentView === "investisseurs") {
                 mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>💰 Gestion des investisseurs</h2><div class="form-grid"><div class="form-group"><label>Nom complet</label><input type="text" id="invNom"></div><div class="form-group"><label>Adresse</label><input type="text" id="invAdresse"></div><div class="form-group"><label>Email</label><input type="email" id="invEmail"></div><div class="form-group"><label>Téléphone 1</label><input type="tel" id="invTel1"></div><div class="form-group"><label>Téléphone 2</label><input type="tel" id="invTel2"></div><div class="form-group"><label>Pourcentage (%)</label><input type="number" id="invPourc" step="0.1"></div><div class="form-group"><label>Durée (mois)</label><input type="number" id="invDuree" step="1" value="12"></div></div><button id="addInvestisseurBtn">➕ Ajouter investisseur</button><div id="investisseursList" class="card-list"></div>`;
             } else if (adminCurrentView === "settings") {
-                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🏢 Configuration</h2><div class="form-grid"><div class="form-group"><label>Nom entreprise</label><input type="text" id="companyName" value="${appData.company.name}"></div><div class="form-group"><label>Logo</label><input type="file" id="companyLogoUpload" accept="image/*"><button id="applyLogoBtn" class="btn-secondary">Appliquer</button><div id="currentLogoPreview" style="margin-top:8px;">${appData.company.logo ? `<img src="${appData.company.logo}" style="max-height:60px;">` : 'Aucun logo'}</div></div><div class="form-group"><label>Taux USD→HTG</label><input type="number" id="tauxChange" step="1" value="${appData.company.tauxUSDToHTG}"><button id="saveTauxBtn">Enregistrer</button></div><div class="form-group"><label>Prix par livre (USD)</label><input type="number" id="prixParLivre" step="0.1" value="${appData.company.prixParLivre}"></div><div class="form-group"><label>Frais fixe (USD)</label><input type="number" id="fraisFixe" step="0.5" value="${appData.company.fraisFixe}"></div><button id="saveTarifsBtn" class="btn-secondary">Enregistrer tarifs</button></div><h3>📜 Historique des notifications</h3><div id="notificationsHistory" style="max-height:300px; overflow-y:auto; background:#f9f9ff; border-radius:20px; padding:12px; margin-top:15px;"></div>`;
+                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🏢 Configuration</h2><div class="form-grid"><div class="form-group"><label>Nom entreprise</label><input type="text" id="companyName" value="${appData.company.name}"></div><div class="form-group"><label>Logo</label><input type="file" id="companyLogoUpload" accept="image/*"><button id="applyLogoBtn" class="btn-secondary">Appliquer</button><div id="currentLogoPreview" style="margin-top:8px;">${appData.company.logo ? `<img src="${appData.company.logo}" style="max-height:60px;">` : 'Aucun logo'}</div></div><div class="form-group"><label>Taux USD→HTG</label><input type="number" id="tauxChange" step="1" value="${appData.company.tauxUSDToHTG}"><button id="saveTauxBtn">Enregistrer</button></div><div class="form-group"><label>Prix par livre (USD)</label><input type="number" id="prixParLivre" step="0.1" value="${appData.company.prixParLivre}"></div><div class="form-group"><label>Frais fixe (USD)</label><input type="number" id="fraisFixe" step="0.5" value="${appData.company.fraisFixe}"></div><div class="form-group"><label>🛡️ Superviseur actif</label><select id="superviseurActif"><option value="true" ${appData.company.superviseurActif === true ? 'selected' : ''}>Oui (validation requise avant livraison)</option><option value="false" ${appData.company.superviseurActif === false ? 'selected' : ''}>Non (validation automatique, livreur voit direct)</option></select><button id="saveSuperviseurBtn" class="btn-secondary">Appliquer</button></div><button id="saveTarifsBtn" class="btn-secondary">Enregistrer tarifs</button></div><h3>📜 Historique des notifications</h3><div id="notificationsHistory" style="max-height:300px; overflow-y:auto; background:#f9f9ff; border-radius:20px; padding:12px; margin-top:15px;"></div>`;
             } else if (adminCurrentView === "search") {
                 mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🔍 Recherche de colis</h2><input type="text" id="globalSearchInput" placeholder="Rechercher (n° suivi, nom)" style="width:70%;"><button id="globalSearchBtn">Filtrer</button><button id="globalResetBtn" class="btn-secondary">Afficher tous</button><div id="globalColisContainer" class="card-list"></div>`;
             } else if (adminCurrentView === "addresses") {
@@ -417,8 +386,9 @@
             </div>
         `;
 
-        // ========== GESTION DES ÉVÉNEMENTS PAR RÔLE ==========
+        // ========== RECEVEUR ==========
         if (isReceveur) {
+            // ... (identique à précédent, pas de changement)
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
             destSelect.innerHTML = '<option value="">-- Sélectionner --</option>';
@@ -508,79 +478,59 @@
                 showNotification("Données rafraîchies", "success");
             });
 
-            // Formulaire avec compression et indicateur
             const formEnvoi = document.getElementById('formEnvoi');
-            let isSubmitting = false;
             formEnvoi.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                if (isSubmitting) return;
-                isSubmitting = true;
-                const submitBtn = formEnvoi.querySelector('button[type="submit"]');
-                const originalText = submitBtn.textContent;
-                submitBtn.textContent = "⏳ Envoi en cours...";
-                submitBtn.disabled = true;
+                const destLivreurId = destSelect.value;
+                if (!destLivreurId) { showNotification("Choisissez un bureau livreur", "error"); return; }
+                const expediteur = document.getElementById('expediteurNom').value.trim();
+                const destNom = document.getElementById('destinataireNom').value.trim();
+                const adresse = document.getElementById('destinataireAdresse').value.trim();
+                const tel = document.getElementById('destinataireTel').value.trim();
+                const cni = document.getElementById('destinataireCni').value.trim();
+                const poidsLivre = parseFloat(poidsField.value);
+                if (!expediteur || !destNom || !adresse || isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("Champs obligatoires", "error"); return; }
+                let photoBase64 = null;
+                if (photoInput.files.length) photoBase64 = await readFileAsBase64(photoInput.files[0]);
+                const prixUsd = calculerPrixTotalUSD(poidsLivre);
+                const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
+                const tracking = genTracking();
+                const livreurUser = appData.users.find(u => u._id === destLivreurId);
+                const newColis = {
+                    numeroSuivi: tracking,
+                    bureauEnvoiId: currentUser._id,
+                    bureauEnvoiNom: currentUser.bureauNom,
+                    bureauLivreurId: destLivreurId,
+                    bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
+                    expediteurNom: expediteur,
+                    destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
+                    poidsLivre: poidsLivre,
+                    prixUsd: prixUsd,
+                    prixGourdes: prixGourdes,
+                    photoColis: photoBase64,
+                    confirme: false,
+                    statut: "En attente",
+                    paiement: { effectue: false }
+                };
                 try {
-                    const destLivreurId = destSelect.value;
-                    if (!destLivreurId) { showNotification("Choisissez un bureau livreur", "error"); return; }
-                    const expediteur = document.getElementById('expediteurNom').value.trim();
-                    const destNom = document.getElementById('destinataireNom').value.trim();
-                    const adresse = document.getElementById('destinataireAdresse').value.trim();
-                    const tel = document.getElementById('destinataireTel').value.trim();
-                    const cni = document.getElementById('destinataireCni').value.trim();
-                    const poidsLivre = parseFloat(poidsField.value);
-                    if (!expediteur || !destNom || !adresse || isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("Champs obligatoires", "error"); return; }
-                    
-                    let photoBase64 = null;
-                    if (photoInput.files.length) {
-                        const file = photoInput.files[0];
-                        photoBase64 = await compressImage(file, 800, 0.7); // compression rapide
-                    }
-                    
-                    const prixUsd = calculerPrixTotalUSD(poidsLivre);
-                    const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
-                    const tracking = genTracking();
-                    const livreurUser = appData.users.find(u => u._id === destLivreurId);
-                    
-                    const newColis = {
-                        numeroSuivi: tracking,
-                        bureauEnvoiId: currentUser._id,
-                        bureauEnvoiNom: currentUser.bureauNom,
-                        bureauLivreurId: destLivreurId,
-                        bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
-                        expediteurNom: expediteur,
-                        destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
-                        poidsLivre: poidsLivre,
-                        prixUsd: prixUsd,
-                        prixGourdes: prixGourdes,
-                        photoColis: photoBase64,
-                        confirme: false,
-                        statut: "En attente",
-                        paiement: { effectue: false }
-                    };
-                    
                     const saved = await apiRequest('/colis', 'POST', newColis);
                     addLocalColis(saved);
-                    showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "success");
+                    showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "info");
                     formContainer.style.display = 'none';
                     showFormBtn.style.display = 'inline-flex';
                     formEnvoi.reset();
                     document.getElementById('previewPhotoColis').innerHTML = '';
                     afficherColisReceveur();
-                } catch (err) {
-                    console.error(err);
-                    showNotification("Erreur lors de l'enregistrement: " + (err.message || "Vérifiez votre connexion"), "error");
-                } finally {
-                    isSubmitting = false;
-                    submitBtn.textContent = originalText;
-                    submitBtn.disabled = false;
-                }
+                } catch (err) { showNotification("Erreur création", "error"); }
             });
         }
 
+        // ========== LIVREUR (identique à avant, mais avec appel API /colis?pourLivreur=true) ==========
         if (isLivreur) {
             async function refreshLivraison() {
                 const searchTerm = document.getElementById('searchLivraisonNom')?.value.trim().toLowerCase() || '';
-                let filtres = appData.colis.filter(c => c.bureauLivreurId === currentUser._id && c.confirme === true);
+                const colisData = await apiRequest('/colis?pourLivreur=true');
+                let filtres = colisData.filter(c => c.bureauLivreurId === currentUser._id);
                 if (searchTerm) filtres = filtres.filter(c => c.destinataire.nom.toLowerCase().includes(searchTerm));
                 const container = document.getElementById('livraisonResults');
                 if (!container) return;
@@ -590,6 +540,7 @@
                     const card = document.createElement('div');
                     card.className = 'colis-card';
                     let statutClass = colis.statut === 'En transit' ? 'status-transit' : (colis.statut === 'Arrivé' ? 'status-arrive' : 'status-livre');
+                    const besoinConfirmation = (appData.company.superviseurActif === true && !colis.confirme);
                     card.innerHTML = `
                         <div class="flex-row">
                             <h3>${colis.numeroSuivi} - <span class="badge ${statutClass}">${colis.statut}</span></h3>
@@ -599,7 +550,8 @@
                         <div><strong>Expéditeur:</strong> ${colis.expediteurNom}</div>
                         <div>⚖️ ${colis.poidsLivre} lb | 💰 ${colis.prixUsd} USD / ${colis.prixGourdes} HTG</div>
                         ${colis.photoColis ? `<img src="${colis.photoColis}" class="photo-thumb">` : ''}
-                        ${colis.statut === 'En transit' ? `<button class="btn-secondary btn-arrivee" data-id="${colis._id}">✈️ Marquer arrivé</button>` : ''}
+                        ${besoinConfirmation ? '<div class="badge status-attente">⏳ En attente validation superviseur</div>' : ''}
+                        ${(!besoinConfirmation && colis.statut === 'En transit') ? `<button class="btn-secondary btn-arrivee" data-id="${colis._id}">✈️ Marquer arrivé</button>` : ''}
                         ${colis.statut === 'Arrivé' && !colis.paiement?.effectue ? `
                             <div style="margin-top:15px; border-top:1px solid #ccc; padding-top:12px;">
                                 <h4>📸 Livraison & paiement</h4>
@@ -624,7 +576,7 @@
                         if (colis && colis.statut === 'En transit') {
                             await apiRequest(`/colis/${id}`, 'PUT', { statut: 'Arrivé' });
                             updateLocalColis(id, { statut: 'Arrivé' });
-                            showNotification(`Colis ${colis.numeroSuivi} marqué arrivé`, "info");
+                            showNotification(`Colis ${colis.numeroSuivi} marqué arrivé - Client notifié`, "info");
                             refreshLivraison();
                         }
                     });
@@ -647,7 +599,7 @@
                         const paiement = { effectue: true, montantRecu: montant, devise, moyen, photoCNI: cniBase64, photoColisLivraison: photoLivBase64 };
                         await apiRequest(`/colis/${id}`, 'PUT', { paiement, statut: 'Livré', dateLivraison: new Date().toISOString() });
                         updateLocalColis(id, { paiement, statut: 'Livré', dateLivraison: new Date().toISOString() });
-                        showNotification(`✅ Colis ${colis.numeroSuivi} livré et payé (${montant} ${devise})`, "success");
+                        showNotification(`✅ Colis ${colis.numeroSuivi} livré et payé`, "success");
                         refreshLivraison();
                     });
                 });
@@ -665,6 +617,7 @@
             afficherAdressesBureauxLivreur();
         }
 
+        // ========== SUPERVISEUR (identique) ==========
         if (isSuperviseur) {
             async function renderColisAttente() {
                 const container = document.getElementById('superviseurList');
@@ -704,6 +657,7 @@
             renderColisAttente();
         }
 
+        // ========== INVESTISSEUR (identique) ==========
         if (isInvestisseur && investisseurActuel) {
             const stats = getInvestisseurStats(investisseurActuel);
             const ctx = document.getElementById('investisseurChart')?.getContext('2d');
@@ -744,6 +698,7 @@
             afficherColisInvestisseur();
         }
 
+        // ========== ADMIN ==========
         if (isAdmin) {
             document.querySelectorAll('.dashboard-card').forEach(card => {
                 card.addEventListener('click', () => {
@@ -781,7 +736,7 @@
                         if (u.role === 'admin') continue;
                         const card = document.createElement('div');
                         card.className = 'colis-card';
-                        card.innerHTML = `<div class="flex-row"><div><strong>${u.nom}</strong> (${u.role})<br>Bureau: ${u.bureauNom}<br>Adresse: ${u.adresse || 'Non renseignée'}<br>Email: ${u.email || '-'}</div><div>🔑 ${u.code}</div><button class="btn-danger" data-id="${u._id}">🗑️</button></div>`;
+                        card.innerHTML = `<div class="flex-row"><div><strong>${u.nom}</strong> (${u.role})<br>Bureau: ${u.bureauNom}<br>Adresse: ${u.adresse || 'Non renseignée'}<br>Email: ${u.email || '-'}<br>Code: ${u.code || '-'}</div><div><button class="btn-secondary btn-reset-pwd" data-id="${u._id}">🔑 Réinitialiser mot de passe</button><button class="btn-danger" data-id="${u._id}">🗑️</button></div></div>`;
                         container.appendChild(card);
                     }
                     document.querySelectorAll('.btn-danger[data-id]').forEach(btn => {
@@ -793,6 +748,16 @@
                             showNotification("Utilisateur supprimé", "info");
                         });
                     });
+                    document.querySelectorAll('.btn-reset-pwd').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const id = btn.getAttribute('data-id');
+                            const newPwd = prompt("Nouveau mot de passe :");
+                            if (newPwd && newPwd.length >= 4) {
+                                await apiRequest(`/users/${id}/password`, 'PUT', { password: newPwd });
+                                showNotification("Mot de passe mis à jour", "success");
+                            } else alert("Mot de passe trop court (min 4 caractères)");
+                        });
+                    });
                 }
                 renderUsersList();
                 document.getElementById('addUserBtn')?.addEventListener('click', async () => {
@@ -801,12 +766,13 @@
                     const email = document.getElementById('newUserEmail').value.trim();
                     const role = document.getElementById('newUserRole').value;
                     const code = document.getElementById('newUserCode').value.trim();
-                    if (!nom || !code) { showNotification("Nom et code requis", "error"); return; }
-                    const newUser = { nom, bureauNom: nom, adresse, email, role, code };
+                    const password = document.getElementById('newUserPassword').value;
+                    if (!nom || !code || !password) { showNotification("Nom, code et mot de passe requis", "error"); return; }
+                    const newUser = { nom, bureauNom: nom, adresse, email, role, code, password };
                     const created = await apiRequest('/users', 'POST', newUser);
                     addLocalUser(created);
                     renderUsersList();
-                    document.getElementById('newUserName').value = ''; document.getElementById('newUserAdresse').value = ''; document.getElementById('newUserEmail').value = ''; document.getElementById('newUserCode').value = '';
+                    document.getElementById('newUserName').value = ''; document.getElementById('newUserAdresse').value = ''; document.getElementById('newUserEmail').value = ''; document.getElementById('newUserCode').value = ''; document.getElementById('newUserPassword').value = '';
                     showNotification(`Utilisateur ${nom} créé`, "success");
                 });
             }
@@ -887,6 +853,13 @@
                         render();
                     } else showNotification("Sélectionnez une image", "error");
                 });
+                document.getElementById('saveSuperviseurBtn')?.addEventListener('click', async () => {
+                    const isActif = document.getElementById('superviseurActif').value === 'true';
+                    const updated = await apiRequest('/company', 'PUT', { superviseurActif: isActif });
+                    updateLocalCompany(updated);
+                    showNotification(`Mode superviseur ${isActif ? 'activé' : 'désactivé'}`, "success");
+                    render();
+                });
                 const companyNameInput = document.getElementById('companyName');
                 if (companyNameInput) {
                     companyNameInput.addEventListener('blur', async (e) => {
@@ -941,7 +914,6 @@
         document.getElementById('logoutBtn')?.addEventListener('click', () => { currentUser = null; adminCurrentView = "dashboard"; dataLoaded = false; render(); });
     }
 
-    // Démarrage
     loadAllData().then(() => render());
 </script>
 </body>

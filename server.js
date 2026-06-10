@@ -23,13 +23,15 @@ const companySchema = new mongoose.Schema({
 });
 const Company = mongoose.model('Company', companySchema);
 
+// Modèle User avec password haché
 const userSchema = new mongoose.Schema({
   nom: { type: String, required: true },
   bureauNom: { type: String, required: true },
   adresse: String,
   email: String,
   role: { type: String, enum: ['receveur', 'livreur', 'superviseur', 'investisseur', 'admin'], required: true },
-  code: { type: String, required: true, unique: true }
+  code: { type: String, unique: true }, // gardé pour compatibilité mais non utilisé pour login
+  password: { type: String, required: true } // mot de passe haché
 });
 const User = mongoose.model('User', userSchema);
 
@@ -136,28 +138,35 @@ app.put('/api/company', async (req, res) => {
 // Users
 app.get('/api/users', async (req, res) => {
   const users = await User.find();
-  res.json(users);
+  // Ne pas renvoyer les mots de passe
+  res.json(users.map(u => ({ ...u._doc, password: undefined })));
 });
 app.post('/api/users', async (req, res) => {
-  const user = new User(req.body);
+  const { password, ...rest } = req.body;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const user = new User({ ...rest, password: hashedPassword });
   await user.save();
-  res.status(201).json(user);
+  res.status(201).json({ ...user._doc, password: undefined });
+});
+app.put('/api/users/:id/password', async (req, res) => {
+  const { password } = req.body;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  await User.findByIdAndUpdate(req.params.id, { password: hashedPassword });
+  res.json({ success: true });
 });
 app.delete('/api/users/:id', async (req, res) => {
   await User.findByIdAndDelete(req.params.id);
   res.status(204).send();
 });
 
-// Colis - NOUVELLE LOGIQUE
+// Colis
 app.get('/api/colis', async (req, res) => {
   const { bureauLivreurId, bureauEnvoiId, statut, pourLivreur, telephoneClient } = req.query;
   let filter = {};
-  
   if (bureauLivreurId) filter.bureauLivreurId = bureauLivreurId;
   if (bureauEnvoiId) filter.bureauEnvoiId = bureauEnvoiId;
   if (statut) filter.statut = statut;
   
-  // LOGIQUE POUR LIVREUR: voir colis selon superviseur actif ou non
   if (pourLivreur === 'true') {
     const company = await Company.findOne();
     if (company && company.superviseurActif === true) {
@@ -168,7 +177,6 @@ app.get('/api/colis', async (req, res) => {
     }
   }
   
-  // Pour les clients: ne voir que les colis ARRIVÉS
   if (telephoneClient) {
     filter['destinataire.telephone'] = telephoneClient;
     filter.statut = 'Arrivé';
@@ -264,12 +272,19 @@ app.post('/api/notifications', async (req, res) => {
   res.status(201).json(notif);
 });
 
-// Auth employé
+// Auth employé (avec mot de passe haché)
 app.post('/api/auth/login', async (req, res) => {
-  const { code } = req.body;
-  const user = await User.findOne({ code });
-  if (!user) return res.status(401).json({ error: 'Code invalide' });
-  res.json(user);
+  const { identifier, password } = req.body; // identifier peut être code (ancien) ou email
+  let user;
+  if (identifier.includes('@')) {
+    user = await User.findOne({ email: identifier });
+  } else {
+    user = await User.findOne({ code: identifier });
+  }
+  if (!user) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
+  res.json({ ...user._doc, password: undefined });
 });
 
 // ---------- ROUTES CLIENT ----------
@@ -341,7 +356,6 @@ app.post('/api/clients/pay/:colisId', authClient, async (req, res) => {
   res.json({ success: true, balance: req.client.balance, colis });
 });
 
-// Liste des colis du client - UNIQUEMENT ceux arrivés
 app.get('/api/clients/colis', authClient, async (req, res) => {
   const colis = await Colis.find({ 
     'destinataire.telephone': req.client.telephone,
@@ -360,6 +374,19 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
   res.json({ success: true });
 });
 
+// ---------- MIGRATION : mettre à jour les mots de passe existants (à exécuter une fois) ----------
+async function migratePasswords() {
+  const users = await User.find({ password: { $exists: false } });
+  for (const user of users) {
+    if (user.code) {
+      const hashed = await bcrypt.hash(user.code, 10);
+      user.password = hashed;
+      await user.save();
+      console.log(`Migré: ${user.nom} avec code ${user.code}`);
+    }
+  }
+}
+
 // ---------- CONNEXION MONGODB ----------
 const MONGODB_URI = process.env.MONGODB_URL || 'mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/shiplog?retryWrites=true&w=majority';
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
@@ -367,18 +394,26 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
     console.log('✅ Connecté à MongoDB Atlas');
     const userCount = await User.countDocuments();
     if (userCount === 0) {
-      await User.create([
-        { nom: 'Alice Receveur', bureauNom: 'Bureau Port-au-Prince', adresse: '123, Rue Capois', role: 'receveur', code: '1234', email: 'alice@shiplog.com' },
-        { nom: 'Bob Livreur', bureauNom: 'Bureau Miami', adresse: '456 Biscayne Blvd', role: 'livreur', code: '5678', email: 'bob@shiplog.com' },
-        { nom: 'Superviseur Central', bureauNom: 'Supervision', adresse: 'Siège', role: 'superviseur', code: '9999', email: 'sup@shiplog.com' },
-        { nom: 'Admin Système', bureauNom: 'Siège', adresse: '1 Avenue Centrale', role: 'admin', code: 'admin123', email: 'admin@shiplog.com' }
-      ]);
+      // Création des utilisateurs initiaux avec mots de passe hachés
+      const defaultUsers = [
+        { nom: 'Alice Receveur', bureauNom: 'Bureau Port-au-Prince', adresse: '123, Rue Capois', role: 'receveur', code: '1234', password: '1234', email: 'alice@shiplog.com' },
+        { nom: 'Bob Livreur', bureauNom: 'Bureau Miami', adresse: '456 Biscayne Blvd', role: 'livreur', code: '5678', password: '5678', email: 'bob@shiplog.com' },
+        { nom: 'Superviseur Central', bureauNom: 'Supervision', adresse: 'Siège', role: 'superviseur', code: '9999', password: '9999', email: 'sup@shiplog.com' },
+        { nom: 'Admin Système', bureauNom: 'Siège', adresse: '1 Avenue Centrale', role: 'admin', code: 'admin123', password: 'admin123', email: 'admin@shiplog.com' }
+      ];
+      for (const u of defaultUsers) {
+        const hashed = await bcrypt.hash(u.password, 10);
+        await User.create({ ...u, password: hashed });
+      }
       await Company.create({ name: "Ship'Log Express", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5, superviseurActif: true });
       await Investisseur.create({ 
         nom: 'Jean Dupont', adresse: '10 Rue des Actionnaires', email: 'jean@example.com', 
         telephone1: '123456789', pourcentage: 15, dureeMois: 24, dateDebut: new Date() 
       });
       console.log('📦 Données initiales créées');
+    } else {
+      // Migration pour les anciens users sans password
+      await migratePasswords();
     }
   })
   .catch(err => console.error('❌ Erreur MongoDB:', err));

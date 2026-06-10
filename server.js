@@ -18,7 +18,8 @@ const companySchema = new mongoose.Schema({
   logo: { type: String, default: "" },
   tauxUSDToHTG: { type: Number, default: 130 },
   prixParLivre: { type: Number, default: 2.5 },
-  fraisFixe: { type: Number, default: 5 }
+  fraisFixe: { type: Number, default: 5 },
+  superviseurActif: { type: Boolean, default: true }
 });
 const Company = mongoose.model('Company', companySchema);
 
@@ -85,13 +86,12 @@ const notificationSchema = new mongoose.Schema({
 });
 const Notification = mongoose.model('Notification', notificationSchema);
 
-// Nouveau modèle Client
 const clientSchema = new mongoose.Schema({
   nom: { type: String, required: true },
   email: { type: String, required: true },
   telephone: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  balance: { type: Number, default: 0 }, // en USD
+  balance: { type: Number, default: 0 },
   notifications: [{
     date: Date,
     message: String,
@@ -133,7 +133,7 @@ app.put('/api/company', async (req, res) => {
   res.json(company);
 });
 
-// Users (employés)
+// Users
 app.get('/api/users', async (req, res) => {
   const users = await User.find();
   res.json(users);
@@ -148,24 +148,93 @@ app.delete('/api/users/:id', async (req, res) => {
   res.status(204).send();
 });
 
-// Colis
+// Colis - NOUVELLE LOGIQUE
 app.get('/api/colis', async (req, res) => {
-  const { bureauLivreurId, bureauEnvoiId, confirme, statut } = req.query;
+  const { bureauLivreurId, bureauEnvoiId, statut, pourLivreur, telephoneClient } = req.query;
   let filter = {};
+  
   if (bureauLivreurId) filter.bureauLivreurId = bureauLivreurId;
   if (bureauEnvoiId) filter.bureauEnvoiId = bureauEnvoiId;
-  if (confirme !== undefined) filter.confirme = confirme === 'true';
   if (statut) filter.statut = statut;
+  
+  // LOGIQUE POUR LIVREUR: voir colis selon superviseur actif ou non
+  if (pourLivreur === 'true') {
+    const company = await Company.findOne();
+    if (company && company.superviseurActif === true) {
+      filter.confirme = true;
+      filter.statut = { $in: ['En transit', 'Arrivé'] };
+    } else {
+      filter.statut = { $in: ['En attente', 'En transit', 'Arrivé'] };
+    }
+  }
+  
+  // Pour les clients: ne voir que les colis ARRIVÉS
+  if (telephoneClient) {
+    filter['destinataire.telephone'] = telephoneClient;
+    filter.statut = 'Arrivé';
+  }
+  
   const colis = await Colis.find(filter).sort({ dateEnvoi: -1 });
   res.json(colis);
 });
+
 app.post('/api/colis', async (req, res) => {
+  const company = await Company.findOne();
+  if (company && company.superviseurActif === false) {
+    req.body.confirme = true;
+    req.body.statut = 'En transit';
+  }
   const colis = new Colis(req.body);
   await colis.save();
+  
+  if (colis.destinataire.telephone) {
+    const client = await Client.findOne({ telephone: colis.destinataire.telephone });
+    if (client) {
+      client.notifications.unshift({
+        date: new Date(),
+        message: `📦 Nouveau colis enregistré pour vous: ${colis.numeroSuivi}. Il sera visible dès son arrivée au bureau.`,
+        type: 'info',
+        lu: false
+      });
+      if (client.notifications.length > 50) client.notifications.pop();
+      await client.save();
+    }
+  }
+  
   res.status(201).json(colis);
 });
+
 app.put('/api/colis/:id', async (req, res) => {
   const colis = await Colis.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  
+  if (colis.statut === 'Arrivé' && colis.destinataire.telephone) {
+    const client = await Client.findOne({ telephone: colis.destinataire.telephone });
+    if (client) {
+      client.notifications.unshift({
+        date: new Date(),
+        message: `🎉 Votre colis ${colis.numeroSuivi} est arrivé au bureau! Vous pouvez maintenant le voir dans votre espace client.`,
+        type: 'success',
+        lu: false
+      });
+      if (client.notifications.length > 50) client.notifications.pop();
+      await client.save();
+    }
+  }
+  
+  if (colis.statut === 'Livré' && colis.destinataire.telephone) {
+    const client = await Client.findOne({ telephone: colis.destinataire.telephone });
+    if (client) {
+      client.notifications.unshift({
+        date: new Date(),
+        message: `✅ Votre colis ${colis.numeroSuivi} a été livré avec succès! Merci.`,
+        type: 'success',
+        lu: false
+      });
+      if (client.notifications.length > 50) client.notifications.pop();
+      await client.save();
+    }
+  }
+  
   res.json(colis);
 });
 
@@ -184,7 +253,7 @@ app.delete('/api/investisseurs/:id', async (req, res) => {
   res.status(204).send();
 });
 
-// Notifications (globales)
+// Notifications globales
 app.get('/api/notifications', async (req, res) => {
   const notifs = await Notification.find().sort({ date: -1 }).limit(50);
   res.json(notifs);
@@ -204,7 +273,6 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ---------- ROUTES CLIENT ----------
-// Inscription
 app.post('/api/clients/register', async (req, res) => {
   const { nom, email, telephone, password } = req.body;
   const existing = await Client.findOne({ telephone });
@@ -216,7 +284,6 @@ app.post('/api/clients/register', async (req, res) => {
   res.status(201).json({ token, client: { id: client._id, nom, email, telephone, balance: 0 } });
 });
 
-// Connexion
 app.post('/api/clients/login', async (req, res) => {
   const { telephone, password } = req.body;
   const client = await Client.findOne({ telephone });
@@ -227,12 +294,10 @@ app.post('/api/clients/login', async (req, res) => {
   res.json({ token, client: { id: client._id, nom: client.nom, email: client.email, telephone: client.telephone, balance: client.balance } });
 });
 
-// Profil (me)
 app.get('/api/clients/me', authClient, async (req, res) => {
   res.json({ client: req.client });
 });
 
-// Recharger wallet
 app.post('/api/clients/recharge', authClient, async (req, res) => {
   const { amount, method } = req.body;
   if (amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
@@ -248,13 +313,13 @@ app.post('/api/clients/recharge', authClient, async (req, res) => {
   res.json({ balance: req.client.balance });
 });
 
-// Payer un colis avec wallet
 app.post('/api/clients/pay/:colisId', authClient, async (req, res) => {
   const colis = await Colis.findById(req.params.colisId);
   if (!colis) return res.status(404).json({ error: 'Colis introuvable' });
   if (colis.paiement?.effectue) return res.status(400).json({ error: 'Colis déjà payé' });
   if (colis.destinataire.telephone !== req.client.telephone) return res.status(403).json({ error: 'Ce colis ne vous appartient pas' });
   if (req.client.balance < colis.prixUsd) return res.status(400).json({ error: 'Solde insuffisant' });
+  
   req.client.balance -= colis.prixUsd;
   colis.paiement = {
     effectue: true,
@@ -265,9 +330,10 @@ app.post('/api/clients/pay/:colisId', authClient, async (req, res) => {
     photoColisLivraison: null
   };
   await colis.save();
+  
   req.client.notifications.unshift({
     date: new Date(),
-    message: `✅ Paiement de ${colis.prixUsd} USD pour le colis ${colis.numeroSuivi} effectué depuis votre portefeuille.`,
+    message: `✅ Paiement de ${colis.prixUsd} USD pour le colis ${colis.numeroSuivi} effectué.`,
     type: 'success',
     lu: false
   });
@@ -275,18 +341,19 @@ app.post('/api/clients/pay/:colisId', authClient, async (req, res) => {
   res.json({ success: true, balance: req.client.balance, colis });
 });
 
-// Liste des colis du client
+// Liste des colis du client - UNIQUEMENT ceux arrivés
 app.get('/api/clients/colis', authClient, async (req, res) => {
-  const colis = await Colis.find({ 'destinataire.telephone': req.client.telephone }).sort({ dateEnvoi: -1 });
+  const colis = await Colis.find({ 
+    'destinataire.telephone': req.client.telephone,
+    statut: 'Arrivé'
+  }).sort({ dateEnvoi: -1 });
   res.json(colis);
 });
 
-// Notifications client
 app.get('/api/clients/notifications', authClient, async (req, res) => {
   res.json(req.client.notifications || []);
 });
 
-// Supprimer ses notifications
 app.delete('/api/clients/notifications', authClient, async (req, res) => {
   req.client.notifications = [];
   await req.client.save();
@@ -306,7 +373,7 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
         { nom: 'Superviseur Central', bureauNom: 'Supervision', adresse: 'Siège', role: 'superviseur', code: '9999', email: 'sup@shiplog.com' },
         { nom: 'Admin Système', bureauNom: 'Siège', adresse: '1 Avenue Centrale', role: 'admin', code: 'admin123', email: 'admin@shiplog.com' }
       ]);
-      await Company.create({ name: "Ship'Log Express", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5 });
+      await Company.create({ name: "Ship'Log Express", tauxUSDToHTG: 130, prixParLivre: 2.5, fraisFixe: 5, superviseurActif: true });
       await Investisseur.create({ 
         nom: 'Jean Dupont', adresse: '10 Rue des Actionnaires', email: 'jean@example.com', 
         telephone1: '123456789', pourcentage: 15, dureeMois: 24, dateDebut: new Date() 

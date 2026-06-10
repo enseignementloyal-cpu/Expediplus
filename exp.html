@@ -7,8 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        /* Copiez ici tout le CSS de b.html (carrousels, navbar, cards, etc.) */
-        /* Pour la réponse, je vais inclure l'intégralité du style existant */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #eef5ff; color: #1a2c3e; scroll-behavior: smooth; }
         .ticker-bar { background: linear-gradient(90deg, #0a2f5a, #1e6f9f, #0a2f5a); color: white; padding: 10px 20px; font-weight: 700; overflow: hidden; white-space: nowrap; position: relative; z-index: 100; }
@@ -221,13 +219,11 @@
 </footer>
 
 <script>
-    // ---------- CONFIGURATION API ----------
-    const API_BASE = window.location.origin + '/api';  // si serveur sur même domaine, ou mettez 'http://localhost:3000/api'
+    const API_BASE = window.location.origin + '/api';
     let authToken = localStorage.getItem('clientToken');
     let currentClient = null;
     let companyData = { tauxUSDToHTG: 130 };
 
-    // ---------- HELPER TOAST ----------
     function showToast(message, type = 'info') {
         const area = document.getElementById('toastArea');
         if (!area) return;
@@ -239,7 +235,6 @@
         setTimeout(() => toast.remove(), 5000);
     }
 
-    // ---------- APPEL API GÉNÉRIQUE ----------
     async function apiCall(endpoint, options = {}) {
         const headers = { 'Content-Type': 'application/json', ...options.headers };
         if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
@@ -251,7 +246,6 @@
         return res.json();
     }
 
-    // ---------- CHARGER INFOS ENTREPRISE ----------
     async function loadCompany() {
         try {
             const data = await apiCall('/company');
@@ -259,7 +253,6 @@
         } catch(e) { console.warn(e); }
     }
 
-    // ---------- GESTION CLIENT ----------
     async function registerClient(nom, email, telephone, password) {
         const data = await apiCall('/clients/register', {
             method: 'POST',
@@ -309,7 +302,6 @@
         await apiCall('/clients/notifications', { method: 'DELETE' });
     }
 
-    // ---------- RENDU DASHBOARD ----------
     async function renderClientDashboard() {
         if (!currentClient) return;
         document.getElementById('loginFormCard').style.display = 'none';
@@ -319,11 +311,10 @@
         document.getElementById('walletBalanceUSD').innerHTML = `${balanceUSD.toFixed(2)} USD`;
         document.getElementById('walletBalanceHTG').innerHTML = `${balanceHTG} HTG`;
 
-        // Colis
         try {
             const colisList = await fetchClientColis();
             const container = document.getElementById('clientColisList');
-            if (colisList.length === 0) container.innerHTML = '<p>Aucun colis associé.</p>';
+            if (colisList.length === 0) container.innerHTML = '<p>Aucun colis arrivé pour le moment.</p>';
             else {
                 container.innerHTML = colisList.map(colis => {
                     const statutClass = colis.statut === 'En transit' ? 'status-transit' : (colis.statut === 'Arrivé' ? 'status-arrive' : 'status-livre');
@@ -348,7 +339,6 @@
             }
         } catch(e) { document.getElementById('clientColisList').innerHTML = '<p>Erreur chargement colis</p>'; }
 
-        // Notifications
         try {
             const notifs = await fetchClientNotifications();
             const notifDiv = document.getElementById('clientNotifications');
@@ -359,7 +349,6 @@
         } catch(e) { document.getElementById('clientNotifications').innerHTML = '<div>Erreur chargement notifications</div>'; }
     }
 
-    // ---------- NAVIGATION PAGES ----------
     const pages = ['homePage', 'servicesPage', 'officesPage', 'contactPage', 'registerPage', 'clientLoginPage'];
     function showPage(pageId) {
         pages.forEach(p => document.getElementById(p).classList.remove('active-page'));
@@ -377,7 +366,6 @@
         }
     }
 
-    // ---------- CARROUSEL ----------
     const carouselImages = ['ab.png', 'ac.png', 'ae.png'];
     let slideIndex = 0;
     function initCarousel() {
@@ -410,7 +398,6 @@
         updateCarousel();
     }
 
-    // ---------- BANDE DÉFILANTE ----------
     function updateBannerMessage() {
         let savedMsg = localStorage.getItem('expediplus_banner_msg');
         if (!savedMsg) savedMsg = "📢 Expedip+ Shipping : Livraison express & multi-services – Contactez +509 4114-1321";
@@ -429,7 +416,6 @@
         } else showToast("Code incorrect", "error");
     });
 
-    // ---------- INITIALISATION DES ÉVÉNEMENTS ----------
     function attachEvents() {
         document.querySelectorAll('.nav-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -512,20 +498,16 @@
         });
     }
 
-    // ---------- DÉMARRAGE ----------
     (async () => {
         await loadCompany();
         updateBannerMessage();
         initCarousel();
         attachEvents();
         showPage('homePage');
-        // Vérifier si un token existe et récupérer le client
         if (authToken) {
             try {
                 const data = await apiCall('/clients/me');
                 currentClient = data.client;
-                // Ne pas afficher directement le dashboard, mais laisser l'utilisateur naviguer
-                // On peut simplement stocker currentClient
             } catch(e) {
                 localStorage.removeItem('clientToken');
                 authToken = null;

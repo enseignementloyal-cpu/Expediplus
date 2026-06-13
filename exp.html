@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        /* Vos styles existants (inchangés) */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { background: linear-gradient(145deg, #f6f9fc 0%, #eef2f7 100%); min-height: 100vh; padding: 24px; position: relative; }
         @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -109,9 +110,10 @@
     function deleteOffice(id) { appData.offices = appData.offices.filter(o => o._id !== id); }
 
     let dataLoaded = false;
-    async function loadAllData() {
-        if (dataLoaded) return;
+    async function loadAllData(force = false) {
+        if (dataLoaded && !force) return;
         try {
+            console.log("Chargement des données...");
             const [company, users, colis, investisseurs, notifications, offices] = await Promise.all([
                 apiRequest('/company').catch(() => null),
                 apiRequest('/users').catch(() => []),
@@ -127,6 +129,7 @@
             appData.notifications = notifications;
             appData.offices = offices;
             dataLoaded = true;
+            console.log("Données chargées :", { users: users.length, colis: colis.length });
         } catch (err) {
             console.error("Erreur chargement initial", err);
             showNotification("Impossible de charger les données depuis le serveur.", "error");
@@ -239,7 +242,8 @@
                     const user = await apiRequest('/auth/login', 'POST', { identifier, password });
                     if (user) {
                         currentUser = user;
-                        await loadAllData();
+                        // Forcer le rechargement complet des données après connexion
+                        await loadAllData(true);
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
                     } else throw new Error("Identifiant ou mot de passe incorrect");
@@ -428,7 +432,7 @@
             </div>
         `;
 
-        // ========== RECEVEUR ==========
+        // ========== RECEVEUR (inchangé) ==========
         if (isReceveur) {
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
@@ -566,21 +570,41 @@
             });
         }
 
-        // ========== LIVREUR (CORRECTION : affichage des bureaux) ==========
+        // ========== LIVREUR (CORRECTION MAJEURE) ==========
         if (isLivreur) {
+            // Fonction pour récupérer les colis via l'API avec le bon filtre
+            async function fetchColisPourLivreur() {
+                // On utilise le paramètre pourLivreur=true qui applique la logique superviseurActif côté serveur
+                const url = `/colis?pourLivreur=true&bureauLivreurId=${currentUser._id}`;
+                try {
+                    const colisData = await apiRequest(url);
+                    console.log("Colis reçus pour livreur :", colisData.length);
+                    return colisData;
+                } catch (err) {
+                    console.error("Erreur chargement colis livreur", err);
+                    return [];
+                }
+            }
+
             async function refreshLivraison() {
                 const searchTerm = document.getElementById('searchLivraisonNom')?.value.trim().toLowerCase() || '';
-                const colisData = await apiRequest('/colis?pourLivreur=true');
-                let filtres = colisData.filter(c => c.bureauLivreurId === currentUser._id);
-                if (searchTerm) filtres = filtres.filter(c => c.destinataire.nom.toLowerCase().includes(searchTerm));
+                let colisData = await fetchColisPourLivreur();
+                // Filtrage supplémentaire côté client (par nom)
+                if (searchTerm) {
+                    colisData = colisData.filter(c => c.destinataire.nom.toLowerCase().includes(searchTerm));
+                }
                 const container = document.getElementById('livraisonResults');
                 if (!container) return;
-                if (filtres.length === 0) { container.innerHTML = '<div>Aucun colis trouvé.</div>'; return; }
+                if (colisData.length === 0) {
+                    container.innerHTML = '<div>Aucun colis trouvé pour votre bureau.</div>';
+                    return;
+                }
                 container.innerHTML = '';
-                for (const colis of filtres) {
+                for (const colis of colisData) {
                     const card = document.createElement('div');
                     card.className = 'colis-card';
-                    let statutClass = colis.statut === 'En transit' ? 'status-transit' : (colis.statut === 'Arrivé' ? 'status-arrive' : 'status-livre');
+                    let statutClass = colis.statut === 'En transit' ? 'status-transit' : (colis.statut === 'Arrivé' ? 'status-arrive' : (colis.statut === 'En attente' ? 'status-attente' : 'status-livre'));
+                    // Dans le cas où superviseur est inactif, le colis peut être "En attente" mais directement visible
                     const besoinConfirmation = (appData.company.superviseurActif === true && !colis.confirme);
                     card.innerHTML = `
                         <div class="flex-row">
@@ -607,6 +631,7 @@
                     `;
                     container.appendChild(card);
                 }
+                // Attacher les événements
                 document.querySelectorAll('.print-receipt-btn').forEach(btn => {
                     btn.addEventListener('click', (e) => { const id = btn.getAttribute('data-id'); const colis = appData.colis.find(c => c._id === id); if (colis) printDeliveryReceipt(colis); });
                 });
@@ -645,11 +670,8 @@
                     });
                 });
             }
-            document.getElementById('searchLivBtn')?.addEventListener('click', refreshLivraison);
-            document.getElementById('resetLivBtn')?.addEventListener('click', () => { document.getElementById('searchLivraisonNom').value = ''; refreshLivraison(); });
-            refreshLivraison();
 
-            // Affichage des bureaux pour livreur - CORRECTION
+            // Affichage des bureaux partenaires (avec rechargement périodique)
             function afficherAdressesBureauxLivreur() {
                 const container = document.getElementById('bureauxAddressesLivreur');
                 if (!container) return;
@@ -666,10 +688,16 @@
                     </div>
                 `).join('');
             }
-            // Appel immédiat et mise à jour périodique
+
+            // Premier chargement
+            await refreshLivraison();
             afficherAdressesBureauxLivreur();
-            // Rafraîchir les bureaux toutes les 30 secondes
-            setInterval(async () => {
+
+            // Rafraîchissement périodique des colis (toutes les 15 secondes) et des bureaux (30 secondes)
+            const intervalColis = setInterval(() => {
+                if (currentUser && currentUser.role === 'livreur') refreshLivraison();
+            }, 15000);
+            const intervalBureaux = setInterval(async () => {
                 if (currentUser && currentUser.role === 'livreur') {
                     try {
                         const users = await apiRequest('/users');
@@ -678,6 +706,15 @@
                     } catch(e) { console.warn(e); }
                 }
             }, 30000);
+
+            // Nettoyage des intervalles lors de la déconnexion (optionnel)
+            window.addEventListener('beforeunload', () => {
+                clearInterval(intervalColis);
+                clearInterval(intervalBureaux);
+            });
+
+            document.getElementById('searchLivBtn')?.addEventListener('click', refreshLivraison);
+            document.getElementById('resetLivBtn')?.addEventListener('click', () => { document.getElementById('searchLivraisonNom').value = ''; refreshLivraison(); });
         }
 
         // ========== SUPERVISEUR ==========
@@ -761,7 +798,7 @@
             afficherColisInvestisseur();
         }
 
-        // ========== ADMIN ==========
+        // ========== ADMIN (inchangé, mais on force le rechargement des données si besoin) ==========
         if (isAdmin) {
             document.querySelectorAll('.dashboard-card').forEach(card => {
                 card.addEventListener('click', () => {
@@ -1119,9 +1156,15 @@
             }
         }
 
-        document.getElementById('logoutBtn')?.addEventListener('click', () => { currentUser = null; adminCurrentView = "dashboard"; dataLoaded = false; render(); });
+        document.getElementById('logoutBtn')?.addEventListener('click', () => { 
+            currentUser = null; 
+            adminCurrentView = "dashboard"; 
+            dataLoaded = false; // Permet de recharger les données au prochain login
+            render(); 
+        });
     }
 
+    // Premier chargement
     loadAllData().then(() => render());
 </script>
 </body>

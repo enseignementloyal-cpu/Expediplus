@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static('.'));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
@@ -23,15 +23,14 @@ const companySchema = new mongoose.Schema({
 });
 const Company = mongoose.model('Company', companySchema);
 
-// Modèle User avec password haché
 const userSchema = new mongoose.Schema({
   nom: { type: String, required: true },
   bureauNom: { type: String, required: true },
   adresse: String,
   email: String,
   role: { type: String, enum: ['receveur', 'livreur', 'superviseur', 'investisseur', 'admin'], required: true },
-  code: { type: String, unique: true }, // gardé pour compatibilité mais non utilisé pour login
-  password: { type: String, required: true } // mot de passe haché
+  code: { type: String, unique: true },
+  password: { type: String, required: true }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -105,6 +104,24 @@ const clientSchema = new mongoose.Schema({
 });
 const Client = mongoose.model('Client', clientSchema);
 
+// ---------- MODÈLE CONTENU PUBLIC ----------
+const publicContentSchema = new mongoose.Schema({
+  carouselImages: { type: [String], default: [] },
+  services: [{
+    title: String,
+    description: String,
+    icon: String
+  }],
+  contact: {
+    phone: { type: String, default: "+509 4114-1321" },
+    email: { type: String, default: "expediplusshipping@gmail.com" },
+    whatsapp: { type: String, default: "+509 4114-1321" },
+    hours: { type: String, default: "Lun-Ven 8h-18h, Sam 9h-14h" }
+  },
+  bannerMessage: { type: String, default: "📢 Expedip+ Shipping : Livraison express & multi-services – Contactez +509 4114-1321" }
+});
+const PublicContent = mongoose.model('PublicContent', publicContentSchema);
+
 // ---------- MIDDLEWARE AUTH CLIENT ----------
 const authClient = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
@@ -138,7 +155,6 @@ app.put('/api/company', async (req, res) => {
 // Users
 app.get('/api/users', async (req, res) => {
   const users = await User.find();
-  // Ne pas renvoyer les mots de passe
   res.json(users.map(u => ({ ...u._doc, password: undefined })));
 });
 app.post('/api/users', async (req, res) => {
@@ -272,9 +288,9 @@ app.post('/api/notifications', async (req, res) => {
   res.status(201).json(notif);
 });
 
-// Auth employé (avec mot de passe haché)
+// Auth employé
 app.post('/api/auth/login', async (req, res) => {
-  const { identifier, password } = req.body; // identifier peut être code (ancien) ou email
+  const { identifier, password } = req.body;
   let user;
   if (identifier.includes('@')) {
     user = await User.findOne({ email: identifier });
@@ -285,6 +301,38 @@ app.post('/api/auth/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
   res.json({ ...user._doc, password: undefined });
+});
+
+// ---------- ROUTES CONTENU PUBLIC ----------
+app.get('/api/public-content', async (req, res) => {
+  let content = await PublicContent.findOne();
+  if (!content) {
+    content = new PublicContent({
+      carouselImages: [],
+      services: [
+        { title: "Colis & fret", description: "Expédition par avion/maritime, dédouanement.", icon: "fas fa-boxes" },
+        { title: "Multi-services", description: "Paiement Moncash/Natcash, transfert d'argent.", icon: "fas fa-hand-holding-usd" },
+        { title: "Livraison dernière minute", description: "Porte-à-porte dans toute la région métropolitaine.", icon: "fas fa-truck" }
+      ],
+      contact: { phone: "+509 4114-1321", email: "expediplusshipping@gmail.com", whatsapp: "+509 4114-1321", hours: "Lun-Ven 8h-18h, Sam 9h-14h" },
+      bannerMessage: "📢 Expedip+ Shipping : Livraison express & multi-services – Contactez +509 4114-1321"
+    });
+    await content.save();
+  }
+  res.json(content);
+});
+
+app.put('/api/public-content', async (req, res) => {
+  let content = await PublicContent.findOne();
+  if (!content) content = new PublicContent();
+  Object.assign(content, req.body);
+  await content.save();
+  res.json(content);
+});
+
+app.get('/api/bureaux', async (req, res) => {
+  const bureaux = await User.find({ role: { $in: ['receveur', 'livreur'] } }, 'bureauNom adresse role');
+  res.json(bureaux);
 });
 
 // ---------- ROUTES CLIENT ----------
@@ -374,7 +422,7 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
   res.json({ success: true });
 });
 
-// ---------- MIGRATION : mettre à jour les mots de passe existants (à exécuter une fois) ----------
+// ---------- MIGRATION ----------
 async function migratePasswords() {
   const users = await User.find({ password: { $exists: false } });
   for (const user of users) {
@@ -394,7 +442,6 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
     console.log('✅ Connecté à MongoDB Atlas');
     const userCount = await User.countDocuments();
     if (userCount === 0) {
-      // Création des utilisateurs initiaux avec mots de passe hachés
       const defaultUsers = [
         { nom: 'Alice Receveur', bureauNom: 'Bureau Port-au-Prince', adresse: '123, Rue Capois', role: 'receveur', code: '1234', password: '1234', email: 'alice@shiplog.com' },
         { nom: 'Bob Livreur', bureauNom: 'Bureau Miami', adresse: '456 Biscayne Blvd', role: 'livreur', code: '5678', password: '5678', email: 'bob@shiplog.com' },
@@ -412,9 +459,10 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
       });
       console.log('📦 Données initiales créées');
     } else {
-      // Migration pour les anciens users sans password
       await migratePasswords();
     }
+    // Initialiser le contenu public s'il n'existe pas
+    await PublicContent.findOne() || await PublicContent.create({});
   })
   .catch(err => console.error('❌ Erreur MongoDB:', err));
 

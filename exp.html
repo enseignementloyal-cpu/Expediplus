@@ -12,7 +12,7 @@
         .ticker-bar { background: linear-gradient(90deg, #0a2f5a, #1e6f9f, #0a2f5a); color: white; padding: 10px 20px; font-weight: 700; overflow: hidden; white-space: nowrap; position: relative; z-index: 100; }
         .ticker-content { display: inline-block; animation: tickerScroll 18s linear infinite; padding-left: 100%; }
         .ticker-text { display: inline-block; background: rgba(0,0,0,0.2); padding: 5px 25px; border-radius: 40px; margin-right: 40px; }
-        .edit-msg-btn { position: absolute; right: 20px; top: 8px; background: rgba(255,255,255,0.25); border: none; color: white; border-radius: 40px; padding: 4px 12px; cursor: pointer; }
+        .edit-msg-btn { position: absolute; right: 20px; top: 8px; background: rgba(255,255,255,0.25); border: none; color: white; border-radius: 40px; padding: 4px 12px; cursor: pointer; z-index: 101; }
         @keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
         .navbar { background: white; padding: 12px 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); position: sticky; top: 0; z-index: 99; }
         .logo-area { display: flex; align-items: center; gap: 12px; }
@@ -62,12 +62,15 @@
         .toast.success { background: #166534; } .toast.error { background: #991b1b; } .toast.info { background: #1e3c72; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @media (max-width: 750px) { .navbar { flex-direction: column; } .carousel-slide { height: 280px; } .toast-area { width: 90%; right: 5%; left: 5%; } }
+        /* Modal styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; justify-content: center; align-items: center; }
+        .modal-content { background: white; max-width: 600px; width: 90%; border-radius: 32px; padding: 24px; max-height: 80vh; overflow-y: auto; }
     </style>
 </head>
 <body>
 <div class="ticker-bar">
     <div class="ticker-content" id="tickerContent">
-        <span class="ticker-text" id="bannerMessage">📢 Expedip+ Shipping : Livraison express & multi-services – Contactez +509 4114-1321</span>
+        <span class="ticker-text" id="bannerMessage"></span>
         <span class="ticker-text" id="bannerMessageDuplicate"></span>
     </div>
     <button class="edit-msg-btn" id="editBannerBtn"><i class="fas fa-pen"></i> Modifier</button>
@@ -85,7 +88,7 @@
         <button class="nav-btn" data-page="clientLogin">👤 Espace Client</button>
         <button class="nav-btn" data-page="register">📝 Inscription</button>
     </div>
-    <div class="contact-phone"><i class="fas fa-phone-alt"></i> +509 4114-1321</div>
+    <div class="contact-phone" id="contactPhoneDisplay"><i class="fas fa-phone-alt"></i> +509 4114-1321</div>
 </nav>
 <div id="toastArea" class="toast-area"></div>
 <div class="main-container" id="mainApp">
@@ -97,41 +100,24 @@
             <button class="carousel-btn next" id="nextSlide"><i class="fas fa-chevron-right"></i></button>
             <div class="dots" id="carouselDots"></div>
         </div>
-        <div style="background: linear-gradient(120deg, #d9efff, #e6d9ff); border-radius: 28px; padding: 20px; margin: 20px 0; text-align: center;">
+        <div style="background: linear-gradient(120deg, #d9efff, #e6d9ff); border-radius: 28px; padding: 20px; margin: 20px 0; text-align: center;" id="promoBanner">
             <h3 style="color:#003b6f;">✈️ Livraison USA – Haïti dès 3 jours ouvrés</h3>
-            <p>Appelez-nous: <strong>+509 4114-1321</strong> | Email: <strong>expediplusshipping@gmail.com</strong></p>
+            <p>Appelez-nous: <strong id="promoPhone">+509 4114-1321</strong> | Email: <strong id="promoEmail">expediplusshipping@gmail.com</strong></p>
         </div>
         <h2 class="section-title">Nos prestations phares</h2>
-        <div class="services-grid">
-            <div class="service-card"><i class="fas fa-boxes"></i><h3>Colis & fret</h3><p>Expédition par avion/maritime, dédouanement.</p></div>
-            <div class="service-card"><i class="fas fa-hand-holding-usd"></i><h3>Multi-services</h3><p>Paiement Moncash/Natcash, transfert d'argent.</p></div>
-            <div class="service-card"><i class="fas fa-truck"></i><h3>Livraison dernière minute</h3><p>Porte-à-porte dans toute la région métropolitaine.</p></div>
-        </div>
+        <div class="services-grid" id="homeServicesGrid"></div>
         <h2 class="section-title">📍 Nos bureaux</h2>
-        <div class="offices-grid">
-            <div class="office-card"><i class="fas fa-map-marker-alt"></i><h3>Port-au-Prince</h3><p>Rue Louverture, Delmas 31<br>📞 +509 4114-1321</p></div>
-            <div class="office-card"><i class="fas fa-map-marker-alt"></i><h3>Cap-Haïtien</h3><p>Boulevard Carenage, local 5<br>📞 +509 3789 1234</p></div>
-            <div class="office-card"><i class="fas fa-map-marker-alt"></i><h3>Miami (USA)</h3><p>7878 NW 34th St, Doral<br>📞 +1 305 555 1234</p></div>
-        </div>
+        <div class="offices-grid" id="homeOfficesGrid"></div>
     </div>
     <!-- SERVICES -->
     <div id="servicesPage" class="page bg-logo-section">
         <h2 class="section-title">Nos services complets</h2>
-        <div class="services-grid" style="margin-top:30px;">
-            <div class="service-card"><i class="fas fa-globe-americas"></i><h3>Expédition Internationale</h3><p>USA, Canada, Europe vers Haïti. Suivi en temps réel.</p></div>
-            <div class="service-card"><i class="fas fa-file-invoice-dollar"></i><h3>Dédouanement</h3><p>Gestion des formalités douanières.</p></div>
-            <div class="service-card"><i class="fas fa-mobile-alt"></i><h3>Recharge de portefeuille</h3><p>Approvisionnez votre wallet client en USD/HTG via Moncash/Natcash.</p></div>
-            <div class="service-card"><i class="fas fa-people-arrows"></i><h3>Service porte-à-porte</h3><p>Livraison à domicile avec photo de confirmation.</p></div>
-        </div>
+        <div class="services-grid" style="margin-top:30px;" id="servicesPageGrid"></div>
     </div>
     <!-- BUREAUX -->
     <div id="officesPage" class="page bg-logo-section">
         <h2 class="section-title">Nos agences</h2>
-        <div class="offices-grid">
-            <div class="office-card"><i class="fas fa-building"></i><h3>Bureau Principal (Pétion-Ville)</h3><p>Angle rue Métellus, Immeuble ExpediPlus<br>Lun-Ven 8h-17h, Sam 9h-13h</p></div>
-            <div class="office-card"><i class="fas fa-warehouse"></i><h3>Entrepôt – Croix-des-Bouquets</h3><p>Zone industrielle, Route Nationale #1</p></div>
-            <div class="office-card"><i class="fas fa-ship"></i><h3>Antenne des Gonaïves</h3><p>Rue Charlemagne, près du marché public</p></div>
-        </div>
+        <div class="offices-grid" id="officesPageGrid"></div>
     </div>
     <!-- CONTACT -->
     <div id="contactPage" class="page bg-logo-section">
@@ -147,12 +133,8 @@
                 </form>
                 <p id="contactFeedback" style="margin-top:12px; color:#2b6e3c;"></p>
             </div>
-            <div class="form-card" style="flex:1;">
-                <h3><i class="fas fa-address-card"></i> Coordonnées directes</h3>
-                <p><i class="fas fa-phone"></i> Téléphone : <strong>+509 4114-1321</strong></p>
-                <p><i class="fas fa-envelope"></i> Email : <strong>expediplusshipping@gmail.com</strong></p>
-                <p><i class="fab fa-whatsapp"></i> WhatsApp Business : +509 4114-1321</p>
-                <hr><p><strong>Horaires :</strong> Lun - Ven 8h00 - 18h00 | Sam 9h-14h</p>
+            <div class="form-card" style="flex:1;" id="contactInfoCard">
+                <!-- Rempli dynamiquement -->
             </div>
         </div>
     </div>
@@ -171,7 +153,7 @@
             <p style="margin-top:16px; text-align:center;">Déjà inscrit ? <strong><a href="#" id="goToLoginLink" style="color:#5f9eff;">Connectez-vous ici</a></strong></p>
         </div>
     </div>
-    <!-- ESPACE CLIENT (connexion + dashboard) -->
+    <!-- ESPACE CLIENT -->
     <div id="clientLoginPage" class="page">
         <div class="form-card" id="loginFormCard">
             <h2><i class="fas fa-key"></i> Connexion client</h2>
@@ -215,14 +197,40 @@
 </div>
 <footer>
     <p>© 2025 Expedip+ Shipping & Multi Services – Tous droits réservés – <i class="fas fa-truck-fast"></i> Fiabilité & rapidité</p>
-    <p>📧 expediplusshipping@gmail.com | 📞 +509 4114-1321</p>
+    <p>📧 <span id="footerEmail">expediplusshipping@gmail.com</span> | 📞 <span id="footerPhone">+509 4114-1321</span></p>
 </footer>
+
+<!-- MODAL D'ÉDITION ADMIN -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <h3>Modifier le contenu public</h3>
+        <label>Message défilant :</label><input type="text" id="editBannerMsg" style="width:100%; margin-bottom:12px;">
+        <label>Images du carrousel (base64) :</label>
+        <div id="carouselImagesList"></div>
+        <input type="file" id="newCarouselImage" accept="image/*"><button id="addCarouselImgBtn">Ajouter</button>
+        <hr>
+        <label>Téléphone :</label><input type="text" id="editPhone">
+        <label>Email :</label><input type="email" id="editEmail">
+        <label>WhatsApp :</label><input type="text" id="editWhatsapp">
+        <label>Horaires :</label><input type="text" id="editHours">
+        <hr>
+        <label>Services (un par ligne, format: titre|description|icône) :</label>
+        <textarea id="editServices" rows="4"></textarea>
+        <div style="margin-top:20px; display:flex; gap:12px;">
+            <button id="savePublicContentBtn">💾 Enregistrer</button>
+            <button id="closeModalBtn">Annuler</button>
+        </div>
+    </div>
+</div>
 
 <script>
     const API_BASE = window.location.origin + '/api';
     let authToken = localStorage.getItem('clientToken');
     let currentClient = null;
     let companyData = { tauxUSDToHTG: 130 };
+    let publicContent = null;
+    let slideIndex = 0;
+    let autoSlideInterval = null;
 
     function showToast(message, type = 'info') {
         const area = document.getElementById('toastArea');
@@ -237,7 +245,9 @@
 
     async function apiCall(endpoint, options = {}) {
         const headers = { 'Content-Type': 'application/json', ...options.headers };
-        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+        if (authToken && !endpoint.includes('/clients/login') && !endpoint.includes('/clients/register')) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+        }
         const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
         if (!res.ok) {
             const error = await res.json().catch(() => ({}));
@@ -246,61 +256,154 @@
         return res.json();
     }
 
-    async function loadCompany() {
+    async function loadPublicContent() {
         try {
-            const data = await apiCall('/company');
-            companyData = data;
+            publicContent = await apiCall('/public-content');
+            document.getElementById('bannerMessage').innerText = publicContent.bannerMessage;
+            document.getElementById('bannerMessageDuplicate').innerText = publicContent.bannerMessage;
+            updateCarouselFromContent();
+            updateServicesFromContent();
+            updateContactFromContent();
+            updatePromoFromContent();
+        } catch(e) { console.error(e); }
+    }
+
+    function updateCarouselFromContent() {
+        const slidesContainer = document.getElementById('carouselSlides');
+        const dotsContainer = document.getElementById('carouselDots');
+        if (!slidesContainer) return;
+        const images = publicContent.carouselImages || [];
+        slidesContainer.innerHTML = '';
+        dotsContainer.innerHTML = '';
+        if (images.length === 0) {
+            slidesContainer.innerHTML = '<div class="carousel-slide" style="background:#ccc; display:flex; align-items:center; justify-content:center;">Aucune image</div>';
+            return;
+        }
+        images.forEach((img, idx) => {
+            const slideDiv = document.createElement('div');
+            slideDiv.className = 'carousel-slide';
+            slideDiv.style.backgroundImage = `url('${img}')`;
+            slideDiv.style.backgroundSize = 'cover';
+            slideDiv.style.backgroundPosition = 'center';
+            slideDiv.innerHTML = `<div class="carousel-caption">ExpediPlus - Solution shipping</div>`;
+            slidesContainer.appendChild(slideDiv);
+            const dot = document.createElement('span');
+            dot.classList.add('dot');
+            dot.dataset.index = idx;
+            dot.addEventListener('click', () => { stopAutoSlide(); slideIndex = idx; updateCarouselDisplay(); startAutoSlide(); });
+            dotsContainer.appendChild(dot);
+        });
+        slideIndex = 0;
+        updateCarouselDisplay();
+        startAutoSlide();
+    }
+
+    function updateCarouselDisplay() {
+        const slidesContainer = document.getElementById('carouselSlides');
+        if(slidesContainer) slidesContainer.style.transform = `translateX(-${slideIndex * 100}%)`;
+        document.querySelectorAll('.dot').forEach((d,i) => d.classList.toggle('active', i===slideIndex));
+    }
+
+    function startAutoSlide() {
+        if (autoSlideInterval) clearInterval(autoSlideInterval);
+        autoSlideInterval = setInterval(() => {
+            if (publicContent.carouselImages && publicContent.carouselImages.length) {
+                slideIndex = (slideIndex + 1) % publicContent.carouselImages.length;
+                updateCarouselDisplay();
+            }
+        }, 5500);
+    }
+    function stopAutoSlide() { if (autoSlideInterval) clearInterval(autoSlideInterval); }
+
+    function updateServicesFromContent() {
+        const homeGrid = document.getElementById('homeServicesGrid');
+        const servicesGrid = document.getElementById('servicesPageGrid');
+        if (homeGrid && publicContent.services) {
+            homeGrid.innerHTML = publicContent.services.map(s => `
+                <div class="service-card"><i class="${s.icon}"></i><h3>${s.title}</h3><p>${s.description}</p></div>
+            `).join('');
+        }
+        if (servicesGrid && publicContent.services) {
+            servicesGrid.innerHTML = publicContent.services.map(s => `
+                <div class="service-card"><i class="${s.icon}"></i><h3>${s.title}</h3><p>${s.description}</p></div>
+            `).join('');
+        }
+    }
+
+    function updateContactFromContent() {
+        if (publicContent.contact) {
+            const contactInfoDiv = document.getElementById('contactInfoCard');
+            if (contactInfoDiv) {
+                contactInfoDiv.innerHTML = `
+                    <h3><i class="fas fa-address-card"></i> Coordonnées directes</h3>
+                    <p><i class="fas fa-phone"></i> Téléphone : <strong>${publicContent.contact.phone}</strong></p>
+                    <p><i class="fas fa-envelope"></i> Email : <strong>${publicContent.contact.email}</strong></p>
+                    <p><i class="fab fa-whatsapp"></i> WhatsApp Business : ${publicContent.contact.whatsapp}</p>
+                    <hr><p><strong>Horaires :</strong> ${publicContent.contact.hours}</p>
+                `;
+            }
+            const phoneSpan = document.getElementById('contactPhoneDisplay');
+            if (phoneSpan) phoneSpan.innerHTML = `<i class="fas fa-phone-alt"></i> ${publicContent.contact.phone}`;
+            const footerPhone = document.getElementById('footerPhone');
+            const footerEmail = document.getElementById('footerEmail');
+            if (footerPhone) footerPhone.innerText = publicContent.contact.phone;
+            if (footerEmail) footerEmail.innerText = publicContent.contact.email;
+        }
+    }
+
+    function updatePromoFromContent() {
+        const promoPhone = document.getElementById('promoPhone');
+        const promoEmail = document.getElementById('promoEmail');
+        if (promoPhone && publicContent.contact) promoPhone.innerText = publicContent.contact.phone;
+        if (promoEmail && publicContent.contact) promoEmail.innerText = publicContent.contact.email;
+    }
+
+    async function loadBureaux() {
+        try {
+            const bureaux = await apiCall('/bureaux');
+            const homeOffices = document.getElementById('homeOfficesGrid');
+            const officesPage = document.getElementById('officesPageGrid');
+            if (homeOffices) {
+                homeOffices.innerHTML = bureaux.map(b => `
+                    <div class="office-card"><i class="fas fa-map-marker-alt"></i><h3>${b.bureauNom}</h3><p>${b.adresse || 'Adresse non renseignée'}<br>📞 ${publicContent?.contact?.phone || ''}</p></div>
+                `).join('');
+            }
+            if (officesPage) {
+                officesPage.innerHTML = bureaux.map(b => `
+                    <div class="office-card"><i class="fas fa-building"></i><h3>${b.bureauNom}</h3><p>${b.adresse || 'Adresse non renseignée'}<br>${b.role === 'receveur' ? 'Bureau d’envoi' : 'Bureau de livraison'}</p></div>
+                `).join('');
+            }
         } catch(e) { console.warn(e); }
     }
 
+    // Fonctions client (inchangées)
     async function registerClient(nom, email, telephone, password) {
-        const data = await apiCall('/clients/register', {
-            method: 'POST',
-            body: JSON.stringify({ nom, email, telephone, password })
-        });
+        const data = await apiCall('/clients/register', { method: 'POST', body: JSON.stringify({ nom, email, telephone, password }) });
         authToken = data.token;
         localStorage.setItem('clientToken', authToken);
         currentClient = data.client;
         return data.client;
     }
-
     async function loginClient(telephone, password) {
-        const data = await apiCall('/clients/login', {
-            method: 'POST',
-            body: JSON.stringify({ telephone, password })
-        });
+        const data = await apiCall('/clients/login', { method: 'POST', body: JSON.stringify({ telephone, password }) });
         authToken = data.token;
         localStorage.setItem('clientToken', authToken);
         currentClient = data.client;
         return data.client;
     }
-
     async function rechargeWallet(amount, method) {
-        const data = await apiCall('/clients/recharge', {
-            method: 'POST',
-            body: JSON.stringify({ amount, method })
-        });
+        const data = await apiCall('/clients/recharge', { method: 'POST', body: JSON.stringify({ amount, method }) });
         currentClient.balance = data.balance;
         return data;
     }
-
     async function payerColis(colisId) {
         const data = await apiCall(`/clients/pay/${colisId}`, { method: 'POST' });
         currentClient.balance = data.balance;
         return data;
     }
-
-    async function fetchClientColis() {
-        return await apiCall('/clients/colis');
-    }
-
-    async function fetchClientNotifications() {
-        return await apiCall('/clients/notifications');
-    }
-
-    async function clearClientNotifications() {
-        await apiCall('/clients/notifications', { method: 'DELETE' });
-    }
+    async function fetchClientColis() { return await apiCall('/clients/colis'); }
+    async function fetchClientNotifications() { return await apiCall('/clients/notifications'); }
+    async function clearClientNotifications() { await apiCall('/clients/notifications', { method: 'DELETE' }); }
 
     async function renderClientDashboard() {
         if (!currentClient) return;
@@ -349,6 +452,7 @@
         } catch(e) { document.getElementById('clientNotifications').innerHTML = '<div>Erreur chargement notifications</div>'; }
     }
 
+    // Navigation
     const pages = ['homePage', 'servicesPage', 'officesPage', 'contactPage', 'registerPage', 'clientLoginPage'];
     function showPage(pageId) {
         pages.forEach(p => document.getElementById(p).classList.remove('active-page'));
@@ -365,56 +469,6 @@
             document.getElementById('clientDashboard').style.display = 'none';
         }
     }
-
-    const carouselImages = ['ab.png', 'ac.png', 'ae.png'];
-    let slideIndex = 0;
-    function initCarousel() {
-        const slidesContainer = document.getElementById('carouselSlides');
-        const dotsContainer = document.getElementById('carouselDots');
-        if (!slidesContainer) return;
-        slidesContainer.innerHTML = '';
-        dotsContainer.innerHTML = '';
-        carouselImages.forEach((img, idx) => {
-            const slideDiv = document.createElement('div');
-            slideDiv.className = 'carousel-slide';
-            slideDiv.style.backgroundImage = `url('${img}')`;
-            slideDiv.style.backgroundSize = 'cover';
-            slideDiv.style.backgroundPosition = 'center';
-            slideDiv.innerHTML = `<div class="carousel-caption">ExpediPlus - Solution shipping</div>`;
-            slidesContainer.appendChild(slideDiv);
-            const dot = document.createElement('span');
-            dot.classList.add('dot');
-            dot.dataset.index = idx;
-            dot.addEventListener('click', () => { slideIndex = idx; updateCarousel(); });
-            dotsContainer.appendChild(dot);
-        });
-        function updateCarousel() {
-            slidesContainer.style.transform = `translateX(-${slideIndex * 100}%)`;
-            document.querySelectorAll('.dot').forEach((d,i) => d.classList.toggle('active', i===slideIndex));
-        }
-        document.getElementById('prevSlide')?.addEventListener('click', () => { slideIndex = (slideIndex - 1 + carouselImages.length) % carouselImages.length; updateCarousel(); });
-        document.getElementById('nextSlide')?.addEventListener('click', () => { slideIndex = (slideIndex + 1) % carouselImages.length; updateCarousel(); });
-        setInterval(() => { slideIndex = (slideIndex + 1) % carouselImages.length; updateCarousel(); }, 5500);
-        updateCarousel();
-    }
-
-    function updateBannerMessage() {
-        let savedMsg = localStorage.getItem('expediplus_banner_msg');
-        if (!savedMsg) savedMsg = "📢 Expedip+ Shipping : Livraison express & multi-services – Contactez +509 4114-1321";
-        document.getElementById('bannerMessage').innerText = savedMsg;
-        document.getElementById('bannerMessageDuplicate').innerText = savedMsg;
-    }
-    document.getElementById('editBannerBtn')?.addEventListener('click', () => {
-        const pwd = prompt("🔐 Code propriétaire pour modifier le message :");
-        if (pwd === "admin123" || pwd === "expedi2025") {
-            const newMsg = prompt("Nouveau message :", document.getElementById('bannerMessage').innerText);
-            if (newMsg) {
-                localStorage.setItem('expediplus_banner_msg', newMsg);
-                updateBannerMessage();
-                showToast("✅ Message modifié", "success");
-            }
-        } else showToast("Code incorrect", "error");
-    });
 
     function attachEvents() {
         document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -491,17 +545,117 @@
             const name = document.getElementById('contactName').value;
             const email = document.getElementById('contactEmail').value;
             const msg = document.getElementById('contactMsg').value;
-            window.location.href = `mailto:expediplusshipping@gmail.com?subject=Message de ${name}&body=${encodeURIComponent(msg)}%0A---%0ADe: ${email}`;
+            window.location.href = `mailto:${publicContent?.contact?.email || 'expediplusshipping@gmail.com'}?subject=Message de ${name}&body=${encodeURIComponent(msg)}%0A---%0ADe: ${email}`;
             document.getElementById('contactFeedback').innerText = "Merci ! Message ouvert par email.";
             setTimeout(()=>document.getElementById('contactFeedback').innerText='',4000);
             e.target.reset();
         });
+
+        // Modal admin
+        document.getElementById('editBannerBtn').onclick = async () => {
+            const pwd = prompt("🔐 Code propriétaire :");
+            if (pwd !== "admin123" && pwd !== "expedi2025") {
+                showToast("Code incorrect", "error");
+                return;
+            }
+            if (!publicContent) await loadPublicContent();
+            document.getElementById('editBannerMsg').value = publicContent.bannerMessage;
+            document.getElementById('editPhone').value = publicContent.contact.phone;
+            document.getElementById('editEmail').value = publicContent.contact.email;
+            document.getElementById('editWhatsapp').value = publicContent.contact.whatsapp;
+            document.getElementById('editHours').value = publicContent.contact.hours;
+            const servicesText = publicContent.services.map(s => `${s.title}|${s.description}|${s.icon}`).join('\n');
+            document.getElementById('editServices').value = servicesText;
+            const container = document.getElementById('carouselImagesList');
+            container.innerHTML = '';
+            (publicContent.carouselImages || []).forEach((img, idx) => {
+                const div = document.createElement('div');
+                div.style.margin = '8px';
+                div.innerHTML = `<img src="${img}" style="max-width:100px;"><button class="removeCarouselImg" data-index="${idx}">❌</button>`;
+                container.appendChild(div);
+            });
+            document.querySelectorAll('.removeCarouselImg').forEach(btn => {
+                btn.onclick = () => {
+                    const idx = parseInt(btn.dataset.index);
+                    publicContent.carouselImages.splice(idx, 1);
+                    btn.parentElement.remove();
+                };
+            });
+            document.getElementById('editModal').style.display = 'flex';
+        };
+
+        document.getElementById('addCarouselImgBtn').onclick = () => {
+            const file = document.getElementById('newCarouselImage').files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    publicContent.carouselImages.push(e.target.result);
+                    const container = document.getElementById('carouselImagesList');
+                    const div = document.createElement('div');
+                    div.innerHTML = `<img src="${e.target.result}" style="max-width:100px;"><button class="removeCarouselImg" data-index="${publicContent.carouselImages.length-1}">❌</button>`;
+                    container.appendChild(div);
+                    document.getElementById('newCarouselImage').value = '';
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+
+        document.getElementById('savePublicContentBtn').onclick = async () => {
+            publicContent.bannerMessage = document.getElementById('editBannerMsg').value;
+            publicContent.contact = {
+                phone: document.getElementById('editPhone').value,
+                email: document.getElementById('editEmail').value,
+                whatsapp: document.getElementById('editWhatsapp').value,
+                hours: document.getElementById('editHours').value
+            };
+            const servicesLines = document.getElementById('editServices').value.split('\n').filter(l => l.trim());
+            publicContent.services = servicesLines.map(line => {
+                const [title, description, icon] = line.split('|');
+                return { title: title.trim(), description: description.trim(), icon: icon.trim() };
+            });
+            try {
+                await apiCall('/public-content', 'PUT', publicContent);
+                showToast("Contenu public mis à jour", "success");
+                document.getElementById('editModal').style.display = 'none';
+                await loadPublicContent();
+                await loadBureaux();
+            } catch(e) { showToast(e.message, "error"); }
+        };
+
+        document.getElementById('closeModalBtn').onclick = () => {
+            document.getElementById('editModal').style.display = 'none';
+        };
+
+        // Carousel manual navigation
+        document.getElementById('prevSlide')?.addEventListener('click', () => {
+            if (publicContent.carouselImages && publicContent.carouselImages.length) {
+                stopAutoSlide();
+                slideIndex = (slideIndex - 1 + publicContent.carouselImages.length) % publicContent.carouselImages.length;
+                updateCarouselDisplay();
+                startAutoSlide();
+            }
+        });
+        document.getElementById('nextSlide')?.addEventListener('click', () => {
+            if (publicContent.carouselImages && publicContent.carouselImages.length) {
+                stopAutoSlide();
+                slideIndex = (slideIndex + 1) % publicContent.carouselImages.length;
+                updateCarouselDisplay();
+                startAutoSlide();
+            }
+        });
+    }
+
+    async function loadCompany() {
+        try {
+            const data = await apiCall('/company');
+            companyData = data;
+        } catch(e) { console.warn(e); }
     }
 
     (async () => {
         await loadCompany();
-        updateBannerMessage();
-        initCarousel();
+        await loadPublicContent();
+        await loadBureaux();
         attachEvents();
         showPage('homePage');
         if (authToken) {

@@ -84,7 +84,8 @@
         users: [],
         colis: [],
         investisseurs: [],
-        notifications: []
+        notifications: [],
+        offices: []  // Liste des bureaux
     };
     let currentUser = null;
     let adminCurrentView = "dashboard";
@@ -102,23 +103,29 @@
     function addLocalInvestisseur(inv) { appData.investisseurs.push(inv); }
     function deleteLocalInvestisseur(invId) { appData.investisseurs = appData.investisseurs.filter(i => i._id !== invId); }
     function addLocalNotification(notif) { appData.notifications.unshift(notif); }
+    function setOffices(offices) { appData.offices = offices; }
+    function addOffice(off) { appData.offices.push(off); }
+    function updateOffice(id, off) { const idx = appData.offices.findIndex(o => o._id === id); if (idx !== -1) appData.offices[idx] = off; }
+    function deleteOffice(id) { appData.offices = appData.offices.filter(o => o._id !== id); }
 
     let dataLoaded = false;
     async function loadAllData() {
         if (dataLoaded) return;
         try {
-            const [company, users, colis, investisseurs, notifications] = await Promise.all([
+            const [company, users, colis, investisseurs, notifications, offices] = await Promise.all([
                 apiRequest('/company').catch(() => null),
                 apiRequest('/users').catch(() => []),
                 apiRequest('/colis').catch(() => []),
                 apiRequest('/investisseurs').catch(() => []),
-                apiRequest('/notifications').catch(() => [])
+                apiRequest('/notifications').catch(() => []),
+                apiRequest('/offices').catch(() => [])
             ]);
             if (company) appData.company = company;
             appData.users = users;
             appData.colis = colis;
             appData.investisseurs = investisseurs;
             appData.notifications = notifications;
+            appData.offices = offices;
             dataLoaded = true;
         } catch (err) {
             console.error("Erreur chargement initial", err);
@@ -341,6 +348,7 @@
                         <div class="dashboard-card" data-view="settings"><div style="font-size:2.5rem;">⚙️</div><h3>Paramètres</h3><p>Entreprise, tarifs, superviseur</p></div>
                         <div class="dashboard-card" data-view="search"><div style="font-size:2.5rem;">🔍</div><h3>Recherche colis</h3><p>Suivi global</p></div>
                         <div class="dashboard-card" data-view="addresses"><div style="font-size:2.5rem;">🏢</div><h3>Adresses bureaux</h3><p>Voir toutes les adresses</p></div>
+                        <div class="dashboard-card" data-view="offices"><div style="font-size:2.5rem;">🏛️</div><h3>Bureaux (agences)</h3><p>Ajouter/modifier des agences</p></div>
                         <div class="dashboard-card" data-view="public"><div style="font-size:2.5rem;">🌐</div><h3>Contenu public</h3><p>Gérer carrousel, services, contact</p></div>
                     </div>
                     <div class="stats-grid">
@@ -364,7 +372,25 @@
             } else if (adminCurrentView === "search") {
                 mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🔍 Recherche de colis</h2><input type="text" id="globalSearchInput" placeholder="Rechercher (n° suivi, nom)" style="width:70%;"><button id="globalSearchBtn">Filtrer</button><button id="globalResetBtn" class="btn-secondary">Afficher tous</button><div id="globalColisContainer" class="card-list"></div>`;
             } else if (adminCurrentView === "addresses") {
-                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🏢 Adresses des bureaux</h2><div id="allBureauxAddresses" class="address-grid"></div>`;
+                mainHtml = `<div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div><h2>🏢 Adresses des bureaux (utilisateurs)</h2><div id="allBureauxAddresses" class="address-grid"></div>`;
+            } else if (adminCurrentView === "offices") {
+                mainHtml = `
+                    <div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div>
+                    <h2>🏛️ Gestion des agences / bureaux</h2>
+                    <div style="background:#f0f4fa; border-radius:28px; padding:20px; margin-bottom:30px;">
+                        <h3>➕ Ajouter un nouveau bureau</h3>
+                        <div class="form-grid">
+                            <div class="form-group"><label>Nom du bureau</label><input type="text" id="newOfficeName" placeholder="Ex: Agence de Pétion-Ville"></div>
+                            <div class="form-group"><label>Adresse complète</label><input type="text" id="newOfficeAddress" placeholder="Rue, quartier, ville"></div>
+                            <div class="form-group"><label>Téléphone (optionnel)</label><input type="text" id="newOfficePhone" placeholder="+509 XXXX XXXX"></div>
+                            <div class="form-group"><label>Type</label><select id="newOfficeType"><option value="principal">Principal</option><option value="envoi">Bureau d'envoi</option><option value="livraison">Bureau de livraison</option><option value="autre">Autre</option></select></div>
+                            <div class="form-group"><label>Ordre d'affichage</label><input type="number" id="newOfficeOrder" value="0"></div>
+                        </div>
+                        <button id="addOfficeBtn" class="btn-success">➕ Créer ce bureau</button>
+                    </div>
+                    <h3>📋 Liste des bureaux existants</h3>
+                    <div id="officesList" class="card-list"></div>
+                `;
             } else if (adminCurrentView === "public") {
                 mainHtml = `
                     <div style="margin-bottom:20px;"><button id="backToDashboard" class="btn-outline">← Retour</button></div>
@@ -376,7 +402,7 @@
                         <div class="form-group"><label>WhatsApp</label><input type="text" id="publicWhatsapp"></div>
                         <div class="form-group"><label>Horaires</label><input type="text" id="publicHours"></div>
                         <div class="form-group"><label>Services (format: titre|description|icône, un par ligne)</label><textarea id="publicServices" rows="5"></textarea></div>
-                        <div class="form-group"><label>Images carrousel (cliquez pour ajouter)</label><input type="file" id="carouselUpload" accept="image/*" multiple><div id="carouselPreview" style="display:flex; flex-wrap:wrap; margin-top:10px;"></div></div>
+                        <div class="form-group"><label>Images carrousel (upload, cliquer pour ajouter)</label><input type="file" id="carouselUpload" accept="image/*" multiple><div id="carouselPreview" style="display:flex; flex-wrap:wrap; margin-top:10px;"></div></div>
                     </div>
                     <button id="savePublicSettings" class="btn-success">💾 Enregistrer toutes les modifications</button>
                     <div id="publicFeedback" style="margin-top:20px;"></div>
@@ -724,6 +750,7 @@
                     else if (view === "settings") adminCurrentView = "settings";
                     else if (view === "search") adminCurrentView = "search";
                     else if (view === "addresses") adminCurrentView = "addresses";
+                    else if (view === "offices") adminCurrentView = "offices";
                     else if (view === "public") adminCurrentView = "public";
                     render();
                 });
@@ -926,6 +953,87 @@
                 }
             }
 
+            // ========== GESTION BUREAUX (AGENCES) ==========
+            if (adminCurrentView === "offices") {
+                async function renderOfficesList() {
+                    const container = document.getElementById('officesList');
+                    if (!container) return;
+                    if (appData.offices.length === 0) {
+                        container.innerHTML = '<div>Aucun bureau défini.</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    for (const off of appData.offices) {
+                        const card = document.createElement('div');
+                        card.className = 'colis-card';
+                        card.innerHTML = `
+                            <div class="flex-row">
+                                <div><strong>${off.name}</strong> (${off.type})<br>📍 ${off.address}<br>📞 ${off.phone || 'Non renseigné'}</div>
+                                <div>
+                                    <button class="btn-secondary edit-office-btn" data-id="${off._id}">✏️ Modifier</button>
+                                    <button class="btn-danger delete-office-btn" data-id="${off._id}">🗑️ Supprimer</button>
+                                </div>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    }
+                    document.querySelectorAll('.edit-office-btn').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const id = btn.getAttribute('data-id');
+                            const office = appData.offices.find(o => o._id === id);
+                            const newName = prompt("Nouveau nom :", office.name);
+                            if (newName && newName.trim()) {
+                                const newAddress = prompt("Nouvelle adresse :", office.address);
+                                if (newAddress && newAddress.trim()) {
+                                    const newPhone = prompt("Téléphone :", office.phone);
+                                    const newType = prompt("Type (principal/envoi/livraison/autre) :", office.type);
+                                    const updated = { name: newName.trim(), address: newAddress.trim(), phone: newPhone || "", type: newType || "autre", order: office.order };
+                                    const saved = await apiRequest(`/offices/${id}`, 'PUT', updated);
+                                    updateOffice(id, saved);
+                                    renderOfficesList();
+                                    showNotification("Bureau modifié", "success");
+                                }
+                            }
+                        });
+                    });
+                    document.querySelectorAll('.delete-office-btn').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const id = btn.getAttribute('data-id');
+                            if (confirm("Supprimer ce bureau ?")) {
+                                await apiRequest(`/offices/${id}`, 'DELETE');
+                                deleteOffice(id);
+                                renderOfficesList();
+                                showNotification("Bureau supprimé", "info");
+                            }
+                        });
+                    });
+                }
+                renderOfficesList();
+
+                document.getElementById('addOfficeBtn')?.addEventListener('click', async () => {
+                    const name = document.getElementById('newOfficeName').value.trim();
+                    const address = document.getElementById('newOfficeAddress').value.trim();
+                    const phone = document.getElementById('newOfficePhone').value.trim();
+                    const type = document.getElementById('newOfficeType').value;
+                    const order = parseInt(document.getElementById('newOfficeOrder').value) || 0;
+                    if (!name || !address) {
+                        showNotification("Nom et adresse requis", "error");
+                        return;
+                    }
+                    const newOffice = { name, address, phone, type, order };
+                    const created = await apiRequest('/offices', 'POST', newOffice);
+                    addOffice(created);
+                    renderOfficesList();
+                    document.getElementById('newOfficeName').value = '';
+                    document.getElementById('newOfficeAddress').value = '';
+                    document.getElementById('newOfficePhone').value = '';
+                    document.getElementById('newOfficeType').value = 'principal';
+                    document.getElementById('newOfficeOrder').value = '0';
+                    showNotification("Bureau ajouté", "success");
+                });
+            }
+
+            // ========== CONTENU PUBLIC ==========
             if (adminCurrentView === "public") {
                 (async () => {
                     const content = await apiRequest('/public-content');

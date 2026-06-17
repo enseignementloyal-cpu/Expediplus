@@ -117,7 +117,7 @@
         if (dataLoaded && !force) return;
         try {
             console.log("Chargement des données...");
-            const [company, users, colis, investisseurs, notifications, offices] = await Promise.all([
+            const results = await Promise.allSettled([
                 apiRequest('/company').catch(() => null),
                 apiRequest('/users').catch(() => []),
                 apiRequest('/colis').catch(() => []),
@@ -125,14 +125,48 @@
                 apiRequest('/notifications').catch(() => []),
                 apiRequest('/offices').catch(() => [])
             ]);
-            if (company) appData.company = company;
-            appData.users = users;
-            appData.colis = colis;
-            appData.investisseurs = investisseurs;
-            appData.notifications = notifications;
-            appData.offices = offices;
+
+            const [companyResult, usersResult, colisResult, investisseursResult, notificationsResult, officesResult] = results;
+
+            if (companyResult.status === 'fulfilled' && companyResult.value) {
+                appData.company = companyResult.value;
+            }
+            if (usersResult.status === 'fulfilled') {
+                appData.users = usersResult.value;
+            } else {
+                console.warn('Impossible de charger les utilisateurs');
+            }
+            if (colisResult.status === 'fulfilled') {
+                appData.colis = colisResult.value;
+            } else {
+                console.warn('Impossible de charger les colis');
+            }
+            if (investisseursResult.status === 'fulfilled') {
+                appData.investisseurs = investisseursResult.value;
+            } else {
+                console.warn('Impossible de charger les investisseurs');
+            }
+            if (notificationsResult.status === 'fulfilled') {
+                appData.notifications = notificationsResult.value;
+            } else {
+                console.warn('Impossible de charger les notifications');
+            }
+            if (officesResult.status === 'fulfilled') {
+                appData.offices = officesResult.value;
+            } else {
+                console.warn('Impossible de charger les bureaux');
+            }
+
             dataLoaded = true;
-            console.log("Données chargées :", { users: users.length, colis: colis.length });
+            console.log("Données chargées partiellement :", {
+                users: appData.users.length,
+                colis: appData.colis.length
+            });
+
+            const failures = results.filter(r => r.status === 'rejected');
+            if (failures.length > 0) {
+                showNotification(`Certaines données n'ont pas pu être chargées (${failures.length} échec(s)). Rafraîchissez ou réessayez plus tard.`, 'error');
+            }
         } catch (err) {
             console.error("Erreur chargement initial", err);
             showNotification("Impossible de charger les données depuis le serveur.", "error");

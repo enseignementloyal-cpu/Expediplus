@@ -75,7 +75,10 @@
         const options = { method, headers: { 'Content-Type': 'application/json' } };
         if (body) options.body = JSON.stringify(body);
         const response = await fetch(`${API_BASE}${endpoint}`, options);
-        if (!response.ok) throw new Error(`Erreur ${response.status}: ${await response.text()}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Erreur ${response.status}: ${errorText}`);
+        }
         if (method === 'DELETE') return true;
         return await response.json();
     }
@@ -229,27 +232,33 @@
                     <h2 style="font-size:2rem;">🚢 ${appData.company.name}</h2>
                     ${appData.company.logo ? `<img src="${appData.company.logo}" style="max-width:120px; margin:15px auto;">` : ''}
                     <p style="margin:20px 0 10px;">Connexion avec votre identifiant (code ou email) et mot de passe</p>
-                    <input type="text" id="loginIdentifier" placeholder="Code ou email" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;">
-                    <input type="password" id="loginPassword" placeholder="Mot de passe" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;">
-                    <button id="loginBtn" style="margin-top:12px;">Se connecter</button>
-                    <div id="loginError" style="margin-top:12px; display:none; color:red;"></div>
+                    <form id="loginForm" style="width:100%;">
+                        <input type="text" id="loginIdentifier" placeholder="Code ou email" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;" required>
+                        <input type="password" id="loginPassword" placeholder="Mot de passe" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;" required>
+                        <button type="submit" style="margin-top:12px; width:100%;">Se connecter</button>
+                        <div id="loginError" style="margin-top:12px; display:none; color:red;"></div>
+                    </form>
                 </div>
             `;
-            document.getElementById('loginBtn')?.addEventListener('click', async () => {
+            document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
+                e.preventDefault();
                 const identifier = document.getElementById('loginIdentifier').value.trim();
                 const password = document.getElementById('loginPassword').value;
+                const errorDiv = document.getElementById('loginError');
+                errorDiv.style.display = 'none';
+                errorDiv.innerText = '';
                 try {
                     const user = await apiRequest('/auth/login', 'POST', { identifier, password });
                     if (user) {
                         currentUser = user;
-                        // Forcer le rechargement complet des données après connexion
                         await loadAllData(true);
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
-                    } else throw new Error("Identifiant ou mot de passe incorrect");
+                    }
                 } catch (err) {
-                    document.getElementById('loginError').style.display = 'block';
-                    document.getElementById('loginError').innerText = '❌ Identifiant ou mot de passe incorrect.';
+                    errorDiv.style.display = 'block';
+                    errorDiv.innerText = err.message || '❌ Identifiant ou mot de passe incorrect.';
+                    console.error('Erreur login:', err);
                 }
             });
             return;
@@ -570,11 +579,9 @@
             });
         }
 
-        // ========== LIVREUR (CORRECTION MAJEURE) ==========
+        // ========== LIVREUR (inchangé) ==========
         if (isLivreur) {
-            // Fonction pour récupérer les colis via l'API avec le bon filtre
             async function fetchColisPourLivreur() {
-                // On utilise le paramètre pourLivreur=true qui applique la logique superviseurActif côté serveur
                 const url = `/colis?pourLivreur=true&bureauLivreurId=${currentUser._id}`;
                 try {
                     const colisData = await apiRequest(url);
@@ -589,7 +596,6 @@
             async function refreshLivraison() {
                 const searchTerm = document.getElementById('searchLivraisonNom')?.value.trim().toLowerCase() || '';
                 let colisData = await fetchColisPourLivreur();
-                // Filtrage supplémentaire côté client (par nom)
                 if (searchTerm) {
                     colisData = colisData.filter(c => c.destinataire.nom.toLowerCase().includes(searchTerm));
                 }
@@ -604,7 +610,6 @@
                     const card = document.createElement('div');
                     card.className = 'colis-card';
                     let statutClass = colis.statut === 'En transit' ? 'status-transit' : (colis.statut === 'Arrivé' ? 'status-arrive' : (colis.statut === 'En attente' ? 'status-attente' : 'status-livre'));
-                    // Dans le cas où superviseur est inactif, le colis peut être "En attente" mais directement visible
                     const besoinConfirmation = (appData.company.superviseurActif === true && !colis.confirme);
                     card.innerHTML = `
                         <div class="flex-row">
@@ -631,7 +636,6 @@
                     `;
                     container.appendChild(card);
                 }
-                // Attacher les événements
                 document.querySelectorAll('.print-receipt-btn').forEach(btn => {
                     btn.addEventListener('click', (e) => { const id = btn.getAttribute('data-id'); const colis = appData.colis.find(c => c._id === id); if (colis) printDeliveryReceipt(colis); });
                 });
@@ -671,7 +675,6 @@
                 });
             }
 
-            // Affichage des bureaux partenaires (avec rechargement périodique)
             function afficherAdressesBureauxLivreur() {
                 const container = document.getElementById('bureauxAddressesLivreur');
                 if (!container) return;
@@ -689,11 +692,9 @@
                 `).join('');
             }
 
-            // Premier chargement
             await refreshLivraison();
             afficherAdressesBureauxLivreur();
 
-            // Rafraîchissement périodique des colis (toutes les 15 secondes) et des bureaux (30 secondes)
             const intervalColis = setInterval(() => {
                 if (currentUser && currentUser.role === 'livreur') refreshLivraison();
             }, 15000);
@@ -707,7 +708,6 @@
                 }
             }, 30000);
 
-            // Nettoyage des intervalles lors de la déconnexion (optionnel)
             window.addEventListener('beforeunload', () => {
                 clearInterval(intervalColis);
                 clearInterval(intervalBureaux);
@@ -798,7 +798,7 @@
             afficherColisInvestisseur();
         }
 
-        // ========== ADMIN (inchangé, mais on force le rechargement des données si besoin) ==========
+        // ========== ADMIN (inchangé) ==========
         if (isAdmin) {
             document.querySelectorAll('.dashboard-card').forEach(card => {
                 card.addEventListener('click', () => {
@@ -1159,7 +1159,7 @@
         document.getElementById('logoutBtn')?.addEventListener('click', () => { 
             currentUser = null; 
             adminCurrentView = "dashboard"; 
-            dataLoaded = false; // Permet de recharger les données au prochain login
+            dataLoaded = false;
             render(); 
         });
     }

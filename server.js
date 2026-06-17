@@ -127,19 +127,17 @@ const clientSchema = new mongoose.Schema({
 });
 const Client = mongoose.model('Client', clientSchema);
 
-// ----- MODÈLE BUREAU (AGENCE) -----
 const officeSchema = new mongoose.Schema({
-    name: { type: String, required: true },        // Nom du bureau
-    address: { type: String, required: true },     // Adresse complète
-    phone: { type: String, default: "" },          // Téléphone spécifique (optionnel)
+    name: { type: String, required: true },
+    address: { type: String, required: true },
+    phone: { type: String, default: "" },
     type: { type: String, enum: ['principal', 'envoi', 'livraison', 'autre'], default: 'autre' },
-    order: { type: Number, default: 0 }            // Ordre d'affichage
+    order: { type: Number, default: 0 }
 });
 const Office = mongoose.model('Office', officeSchema);
 
-// ----- MODÈLE CONTENU PUBLIC -----
 const publicContentSchema = new mongoose.Schema({
-    carouselImages: { type: [String], default: [] }, // URLs
+    carouselImages: { type: [String], default: [] },
     services: [{
         title: String,
         description: String,
@@ -316,6 +314,10 @@ app.post('/api/notifications', async (req, res) => {
 // Auth employé
 app.post('/api/auth/login', async (req, res) => {
     const { identifier, password } = req.body;
+    // Validation des entrées
+    if (!identifier || !password) {
+        return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
+    }
     let user;
     if (identifier.includes('@')) {
         user = await User.findOne({ email: identifier });
@@ -323,9 +325,16 @@ app.post('/api/auth/login', async (req, res) => {
         user = await User.findOne({ code: identifier });
     }
     if (!user) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
-    res.json({ ...user._doc, password: undefined });
+
+    // Comparaison sécurisée
+    try {
+        const valid = await bcrypt.compare(password, user.password);
+        if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
+        res.json({ ...user._doc, password: undefined });
+    } catch (err) {
+        console.error('Erreur bcrypt:', err);
+        return res.status(500).json({ error: 'Erreur interne lors de la vérification du mot de passe' });
+    }
 });
 
 // ---------- ROUTES CONTENU PUBLIC ----------
@@ -459,16 +468,28 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
     res.json({ success: true });
 });
 
-// ---------- MIGRATION PASSWORDS ----------
-async function migratePasswords() {
-    const users = await User.find({ password: { $exists: false } });
+// ---------- MIGRATION DES MOTS DE PASSE (CRITIQUE) ----------
+async function upgradePasswords() {
+    console.log('🔍 Vérification des mots de passe utilisateurs...');
+    const users = await User.find({});
+    let modified = 0;
     for (const user of users) {
-        if (user.code) {
-            const hashed = await bcrypt.hash(user.code, 10);
+        // Si le mot de passe ne ressemble pas à un hash bcrypt
+        if (!user.password || !user.password.startsWith('$2b$')) {
+            console.log(`  ⚠️  Mot de passe non haché pour ${user.nom} (${user.code})`);
+            // On utilise son code comme nouveau mot de passe par défaut (ou on garde l'ancien en clair)
+            const newPassword = user.code || 'default123';
+            const hashed = await bcrypt.hash(newPassword, 10);
             user.password = hashed;
             await user.save();
-            console.log(`Migré: ${user.nom} avec code ${user.code}`);
+            modified++;
+            console.log(`  ✅ Mot de passe réinitialisé pour ${user.nom} avec son code (${newPassword})`);
         }
+    }
+    if (modified > 0) {
+        console.log(`✅ ${modified} mot(s) de passe mis à jour en bcrypt.`);
+    } else {
+        console.log('✅ Tous les mots de passe sont déjà hachés.');
     }
 }
 
@@ -477,6 +498,10 @@ const MONGODB_URI = process.env.MONGODB_URL || 'mongodb+srv://<username>:<passwo
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(async () => {
         console.log('✅ Connecté à MongoDB Atlas');
+        
+        // Migration des mots de passe pour tous les utilisateurs
+        await upgradePasswords();
+
         const userCount = await User.countDocuments();
         if (userCount === 0) {
             const defaultUsers = [
@@ -495,9 +520,8 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
                 telephone1: '123456789', pourcentage: 15, dureeMois: 24, dateDebut: new Date() 
             });
             console.log('📦 Données initiales créées');
-        } else {
-            await migratePasswords();
         }
+
         // Initialisation du contenu public
         await PublicContent.findOne() || await PublicContent.create({});
         // Initialisation d'un bureau par défaut si aucun
@@ -510,8 +534,12 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
             ]);
             console.log('📦 Bureaux par défaut créés');
         }
-    })
-    .catch(err => console.error('❌ Erreur MongoDB:', err));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
+        // Démarrer le serveur
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
+    })
+    .catch(err => {
+        console.error('❌ Erreur MongoDB:', err);
+        process.exit(1);
+    });

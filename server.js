@@ -153,6 +153,10 @@ const publicContentSchema = new mongoose.Schema({
 });
 const PublicContent = mongoose.model('PublicContent', publicContentSchema);
 
+// ---------- FLAG DE MIGRATION ----------
+// Pendant la migration, le login retourne une erreur explicite
+let migrationEnCours = false;
+
 // ---------- MIDDLEWARE AUTH CLIENT ----------
 const authClient = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -313,8 +317,12 @@ app.post('/api/notifications', async (req, res) => {
 
 // Auth employé
 app.post('/api/auth/login', async (req, res) => {
+    // FIX: Bloquer le login proprement pendant la migration des mots de passe
+    if (migrationEnCours) {
+        return res.status(503).json({ error: 'Serveur en cours d\'initialisation, veuillez réessayer dans quelques secondes.' });
+    }
+
     const { identifier, password } = req.body;
-    // Validation des entrées
     if (!identifier || !password) {
         return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
     }
@@ -326,7 +334,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
     if (!user) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
 
-    // Comparaison sécurisée
     try {
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
@@ -470,18 +477,17 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
 
 // ---------- MIGRATION DES MOTS DE PASSE (CRITIQUE) ----------
 async function upgradePasswords() {
+    migrationEnCours = true; // FIX: signaler que la migration est en cours
     console.log('🔍 Vérification des mots de passe utilisateurs...');
     const users = await User.find({});
     let modified = 0;
     for (const user of users) {
-        // Si le mot de passe ne ressemble pas à un hash bcrypt
         if (!user.password || !user.password.startsWith('$2b$')) {
             console.log(`  ⚠️  Mot de passe non haché pour ${user.nom} (${user.code})`);
-            // On utilise son code comme nouveau mot de passe par défaut (ou on garde l'ancien en clair)
             const newPassword = user.code || 'default123';
             const hashed = await bcrypt.hash(newPassword, 10);
-            user.password = hashed;
-            await user.save();
+            // FIX: utiliser findByIdAndUpdate pour éviter les conflits de lecture/écriture
+            await User.findByIdAndUpdate(user._id, { password: hashed });
             modified++;
             console.log(`  ✅ Mot de passe réinitialisé pour ${user.nom} avec son code (${newPassword})`);
         }
@@ -491,6 +497,7 @@ async function upgradePasswords() {
     } else {
         console.log('✅ Tous les mots de passe sont déjà hachés.');
     }
+    migrationEnCours = false; // FIX: migration terminée, login autorisé
 }
 
 // ---------- CONNEXION MONGODB ----------
@@ -498,8 +505,12 @@ const MONGODB_URI = process.env.MONGODB_URL || 'mongodb+srv://<username>:<passwo
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(async () => {
         console.log('✅ Connecté à MongoDB Atlas');
-        
-        // Migration des mots de passe pour tous les utilisateurs
+
+        // FIX: Démarrer le serveur AVANT la migration pour ne pas bloquer les requêtes
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
+
+        // Lancer la migration en arrière-plan (flag migrationEnCours bloque /api/auth/login pendant ce temps)
         await upgradePasswords();
 
         const userCount = await User.countDocuments();
@@ -534,10 +545,6 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
             ]);
             console.log('📦 Bureaux par défaut créés');
         }
-
-        // Démarrer le serveur
-        const PORT = process.env.PORT || 3000;
-        app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
     })
     .catch(err => {
         console.error('❌ Erreur MongoDB:', err);

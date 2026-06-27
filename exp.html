@@ -62,6 +62,25 @@
         .address-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-top: 20px; }
         .address-card { background: #f8fafc; border-radius: 24px; padding: 16px; border-left: 4px solid #1e3c72; }
         .loader { text-align: center; padding: 40px; color: #1e3c72; }
+
+        /* FIX: Styles pour le spinner de connexion */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .login-spinner {
+            display: inline-block;
+            width: 18px; height: 18px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        .login-btn-loading {
+            opacity: 0.8;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .info-msg { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: 20px; padding: 10px 16px; margin-top: 10px; font-size: 0.88rem; display: none; }
     </style>
 </head>
 <body>
@@ -158,7 +177,7 @@
             }
 
             dataLoaded = true;
-            console.log("Données chargées partiellement :", {
+            console.log("Données chargées :", {
                 users: appData.users.length,
                 colis: appData.colis.length
             });
@@ -266,35 +285,92 @@
                     <h2 style="font-size:2rem;">🚢 ${appData.company.name}</h2>
                     ${appData.company.logo ? `<img src="${appData.company.logo}" style="max-width:120px; margin:15px auto;">` : ''}
                     <p style="margin:20px 0 10px;">Connexion avec votre identifiant (code ou email) et mot de passe</p>
-                    <form id="loginForm" style="width:100%;">
+                    <div style="width:100%;">
                         <input type="text" id="loginIdentifier" placeholder="Code ou email" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;" required>
                         <input type="password" id="loginPassword" placeholder="Mot de passe" style="width:100%; margin:10px 0; padding:14px; border-radius:60px; border:1px solid #ccc;" required>
-                        <button type="submit" style="margin-top:12px; width:100%;">Se connecter</button>
-                        <div id="loginError" style="margin-top:12px; display:none; color:red;"></div>
-                    </form>
+                        <button id="loginBtn" style="margin-top:12px; width:100%;">Se connecter</button>
+                        <div id="loginError" style="margin-top:12px; display:none; color:red; font-size:0.9rem;"></div>
+                        <div id="loginInfo" class="info-msg"></div>
+                    </div>
                 </div>
             `;
-            document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const identifier = document.getElementById('loginIdentifier').value.trim();
-                const password = document.getElementById('loginPassword').value;
+
+            // FIX: logique de connexion avec spinner, retry automatique si serveur en init
+            const loginBtn = document.getElementById('loginBtn');
+            const identifierInput = document.getElementById('loginIdentifier');
+            const passwordInput = document.getElementById('loginPassword');
+
+            async function doLogin() {
+                const identifier = identifierInput.value.trim();
+                const password = passwordInput.value;
                 const errorDiv = document.getElementById('loginError');
+                const infoDiv = document.getElementById('loginInfo');
+
+                if (!identifier || !password) {
+                    errorDiv.style.display = 'block';
+                    errorDiv.innerText = '⚠️ Veuillez remplir tous les champs.';
+                    return;
+                }
+
                 errorDiv.style.display = 'none';
                 errorDiv.innerText = '';
+                infoDiv.style.display = 'none';
+
+                // Afficher le spinner sur le bouton
+                loginBtn.classList.add('login-btn-loading');
+                loginBtn.innerHTML = '<span class="login-spinner"></span>Connexion en cours...';
+
                 try {
-                    const user = await apiRequest('/auth/login', 'POST', { identifier, password });
+                    const response = await fetch(`${API_BASE}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ identifier, password })
+                    });
+
+                    // FIX: Si le serveur est en cours d'initialisation (503), retry automatique
+                    if (response.status === 503) {
+                        infoDiv.style.display = 'block';
+                        infoDiv.innerText = '⏳ Serveur en cours d\'initialisation, nouvelle tentative dans 3 secondes...';
+                        loginBtn.innerHTML = '<span class="login-spinner"></span>Patientez...';
+                        setTimeout(() => doLogin(), 3000);
+                        return;
+                    }
+
+                    if (!response.ok) {
+                        let errMsg = 'Identifiant ou mot de passe incorrect.';
+                        try {
+                            const errData = await response.json();
+                            errMsg = errData.error || errMsg;
+                        } catch(e) {}
+                        throw new Error(errMsg);
+                    }
+
+                    const user = await response.json();
                     if (user) {
                         currentUser = user;
+                        // FIX: Afficher un loader pendant le chargement des données
+                        root.innerHTML = `<div class="loader">⏳ Chargement de votre espace...</div>`;
                         await loadAllData(true);
                         render();
                         showNotification(`Bienvenue ${user.nom}`, "success");
                     }
                 } catch (err) {
+                    // Restaurer le bouton
+                    loginBtn.classList.remove('login-btn-loading');
+                    loginBtn.innerHTML = 'Se connecter';
+                    infoDiv.style.display = 'none';
                     errorDiv.style.display = 'block';
-                    errorDiv.innerText = err.message || '❌ Identifiant ou mot de passe incorrect.';
+                    errorDiv.innerText = '❌ ' + (err.message || 'Identifiant ou mot de passe incorrect.');
                     console.error('Erreur login:', err);
                 }
-            });
+            }
+
+            loginBtn.addEventListener('click', doLogin);
+
+            // Permettre la connexion avec la touche Entrée
+            passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+            identifierInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
             return;
         }
 
@@ -475,7 +551,7 @@
             </div>
         `;
 
-        // ========== RECEVEUR (inchangé) ==========
+        // ========== RECEVEUR ==========
         if (isReceveur) {
             const livreurs = appData.users.filter(u => u.role === 'livreur');
             const destSelect = document.getElementById('destLivreurSelect');
@@ -613,7 +689,7 @@
             });
         }
 
-        // ========== LIVREUR (inchangé) ==========
+        // ========== LIVREUR ==========
         if (isLivreur) {
             async function fetchColisPourLivreur() {
                 const url = `/colis?pourLivreur=true&bureauLivreurId=${currentUser._id}`;
@@ -714,7 +790,7 @@
                 if (!container) return;
                 const bureaux = appData.users.filter(u => u.role === 'receveur' || u.role === 'livreur');
                 if (bureaux.length === 0) {
-                    container.innerHTML = '<div class="address-card">Aucun bureau trouvé. Contactez l’administrateur.</div>';
+                    container.innerHTML = '<div class="address-card">Aucun bureau trouvé. Contactez l\'administrateur.</div>';
                     return;
                 }
                 container.innerHTML = bureaux.map(b => `
@@ -832,7 +908,7 @@
             afficherColisInvestisseur();
         }
 
-        // ========== ADMIN (inchangé) ==========
+        // ========== ADMIN ==========
         if (isAdmin) {
             document.querySelectorAll('.dashboard-card').forEach(card => {
                 card.addEventListener('click', () => {

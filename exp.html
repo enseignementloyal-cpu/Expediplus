@@ -553,30 +553,43 @@
 
         // ========== RECEVEUR ==========
         if (isReceveur) {
-            const livreurs = appData.users.filter(u => u.role === 'livreur');
+            // ── variables partagées dans tout le bloc receveur ──
             const destSelect = document.getElementById('destLivreurSelect');
-            destSelect.innerHTML = '<option value="">-- Sélectionner --</option>';
-            livreurs.forEach(l => {
-                const opt = document.createElement('option');
-                opt.value = l._id;
-                opt.textContent = `${l.bureauNom} - ${l.adresse || 'Adresse non renseignée'}`;
-                destSelect.appendChild(opt);
-            });
-
             const photoInput = document.getElementById('photoColisCam');
-            photoInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                const preview = document.getElementById('previewPhotoColis');
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (ev) => { preview.innerHTML = `<img src="${ev.target.result}" class="photo-thumb" style="max-width:100px;">`; };
-                    reader.readAsDataURL(file);
-                } else preview.innerHTML = '';
-            });
-
             const poidsField = document.getElementById('poidsLivre');
-            const usdField = document.getElementById('prixUsd');
+            const usdField   = document.getElementById('prixUsd');
             const gourdesField = document.getElementById('prixGourdes');
+            const formContainer = document.getElementById('formContainer');
+            const showFormBtn   = document.getElementById('showFormBtn');
+            const cancelBtn     = document.getElementById('cancelFormBtn');
+            const formEnvoi     = document.getElementById('formEnvoi');
+
+            // ── 1. Charger les livreurs depuis le serveur (PAS le cache) ──
+            async function chargerLivreurs() {
+                try {
+                    const freshUsers = await apiRequest('/users');
+                    appData.users = freshUsers;
+                    const livreurs = freshUsers.filter(u => u.role === 'livreur');
+                    destSelect.innerHTML = '<option value="">-- Sélectionner un bureau de livraison --</option>';
+                    if (livreurs.length === 0) {
+                        destSelect.innerHTML += '<option disabled>Aucun bureau livreur disponible</option>';
+                        showNotification("⚠️ Aucun bureau livreur trouvé. Contactez l'administrateur.", "error");
+                        return;
+                    }
+                    livreurs.forEach(l => {
+                        const opt = document.createElement('option');
+                        opt.value = l._id;
+                        opt.textContent = `${l.bureauNom} – ${l.adresse || 'Adresse non renseignée'}`;
+                        destSelect.appendChild(opt);
+                    });
+                    showNotification(`✅ ${livreurs.length} bureau(x) de livraison chargé(s)`, "success");
+                } catch (err) {
+                    console.error('Erreur chargement livreurs:', err);
+                    showNotification("❌ Impossible de charger les bureaux livreurs.", "error");
+                }
+            }
+
+            // ── 2. Calcul prix en temps réel ──
             const updatePrix = () => {
                 let p = parseFloat(poidsField.value) || 0;
                 if (p <= 0) p = 0.1;
@@ -587,48 +600,84 @@
             poidsField.addEventListener('input', updatePrix);
             updatePrix();
 
-            function afficherColisReceveur() {
+            // ── 3. Aperçu photo ──
+            photoInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                const preview = document.getElementById('previewPhotoColis');
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { preview.innerHTML = `<img src="${ev.target.result}" class="photo-thumb" style="max-width:100px;">`; };
+                    reader.readAsDataURL(file);
+                    showNotification("📸 Photo sélectionnée", "info");
+                } else {
+                    preview.innerHTML = '';
+                }
+            });
+
+            // ── 4. Affichage de la liste des colis ──
+            async function afficherColisReceveur() {
                 const container = document.getElementById('colisListReceveur');
                 if (!container) return;
-                const mesColis = appData.colis.filter(c => c.bureauEnvoiId === currentUser._id);
-                if (mesColis.length === 0) { container.innerHTML = '<div>Aucun colis.</div>'; return; }
-                container.innerHTML = '';
-                for (const c of mesColis) {
-                    const livreur = appData.users.find(u => u._id === c.bureauLivreurId);
-                    const adresseLivreur = livreur ? livreur.adresse : 'Adresse inconnue';
-                    const statutAff = c.confirme ? (c.statut === 'En transit' ? 'En transit' : c.statut) : 'En attente confirmation';
-                    const badgeClass = c.confirme ? (c.statut === 'En transit' ? 'status-transit' : 'status-arrive') : 'status-attente';
-                    const div = document.createElement('div');
-                    div.className = 'colis-card';
-                    div.innerHTML = `
-                        <div class="flex-row">
-                            <div><strong>${c.numeroSuivi}</strong> - <span class="badge ${badgeClass}">${statutAff}</span></div>
-                            <button class="btn-outline print-label-btn" data-id="${c._id}" style="padding:4px 12px;">🏷️ Imprimer étiquette</button>
-                        </div>
-                        <div>👤 Destinataire: ${c.destinataire.nom} (${c.destinataire.adresse})</div>
-                        <div>🏢 Bureau livreur: ${c.bureauLivreurNom} - ${adresseLivreur}</div>
-                        <div>💰 ${c.prixUsd} USD / ${c.prixGourdes} HTG</div>
-                        ${c.photoColis ? `<img src="${c.photoColis}" class="photo-thumb">` : ''}
-                    `;
-                    container.appendChild(div);
-                }
-                document.querySelectorAll('.print-label-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        const id = btn.getAttribute('data-id');
-                        const colis = appData.colis.find(c => c._id === id);
-                        if (colis) printReceptionLabel(colis);
+                container.innerHTML = '<div class="loader" style="padding:12px;">Chargement des colis...</div>';
+                try {
+                    const freshColis = await apiRequest(`/colis?bureauEnvoiId=${currentUser._id}`);
+                    appData.colis = freshColis;
+                    if (freshColis.length === 0) {
+                        container.innerHTML = '<div style="text-align:center; padding:20px; color:#64748b;">📭 Aucun colis enregistré pour l\'instant.</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    for (const c of freshColis) {
+                        const livreur = appData.users.find(u => u._id === c.bureauLivreurId);
+                        const adresseLivreur = livreur ? (livreur.adresse || 'Adresse non renseignée') : c.bureauLivreurNom || 'Bureau inconnu';
+                        const statutAff = c.confirme
+                            ? (c.statut === 'En transit' ? 'En transit ✈️' : c.statut)
+                            : '⏳ En attente de confirmation';
+                        const badgeClass = c.confirme
+                            ? (c.statut === 'En transit' ? 'status-transit' : 'status-arrive')
+                            : 'status-attente';
+                        const div = document.createElement('div');
+                        div.className = 'colis-card';
+                        div.innerHTML = `
+                            <div class="flex-row">
+                                <div>
+                                    <strong>${c.numeroSuivi}</strong>
+                                    <span class="badge ${badgeClass}" style="margin-left:8px;">${statutAff}</span>
+                                </div>
+                                <button class="btn-outline print-label-btn" data-id="${c._id}" style="padding:4px 12px;">🏷️ Étiquette</button>
+                            </div>
+                            <div style="margin-top:8px;">👤 <strong>Expéditeur:</strong> ${c.expediteurNom}</div>
+                            <div>📦 <strong>Destinataire:</strong> ${c.destinataire.nom} – ${c.destinataire.adresse}</div>
+                            ${c.destinataire.telephone ? `<div>📞 ${c.destinataire.telephone}</div>` : ''}
+                            <div>🏢 <strong>Bureau livreur:</strong> ${c.bureauLivreurNom} – ${adresseLivreur}</div>
+                            <div>⚖️ ${c.poidsLivre} lb &nbsp;|&nbsp; 💰 ${c.prixUsd} USD / ${c.prixGourdes} HTG</div>
+                            <div style="font-size:0.8rem; color:#94a3b8;">📅 ${new Date(c.dateEnvoi).toLocaleString()}</div>
+                            ${c.photoColis ? `<img src="${c.photoColis}" class="photo-thumb">` : ''}
+                        `;
+                        container.appendChild(div);
+                    }
+                    document.querySelectorAll('.print-label-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const id = btn.getAttribute('data-id');
+                            const colis = appData.colis.find(c => c._id === id);
+                            if (colis) {
+                                printReceptionLabel(colis);
+                                showNotification(`🏷️ Étiquette imprimée pour ${colis.numeroSuivi}`, "info");
+                            }
+                        });
                     });
-                });
+                } catch (err) {
+                    console.error('Erreur chargement colis receveur:', err);
+                    container.innerHTML = '<div style="color:#b91c1c; padding:12px;">❌ Impossible de charger les colis. Rafraîchissez.</div>';
+                }
             }
-            afficherColisReceveur();
 
-            // FIX: chargement en temps réel depuis le serveur (et non depuis le cache local)
+            // ── 5. Adresses des bureaux partenaires ──
             async function afficherAdressesBureaux() {
                 const container = document.getElementById('bureauxAddresses');
                 if (!container) return;
                 container.innerHTML = '<div class="loader" style="padding:16px;">Chargement des adresses...</div>';
                 try {
-                    // Recharger les users depuis le serveur à chaque fois
                     const freshUsers = await apiRequest('/users');
                     appData.users = freshUsers;
                     const bureaux = freshUsers.filter(u => u.role === 'receveur' || u.role === 'livreur');
@@ -651,73 +700,136 @@
                     container.innerHTML = '<div class="address-card" style="color:#b91c1c;">❌ Impossible de charger les adresses. Réessayez.</div>';
                 }
             }
-            afficherAdressesBureaux();
 
-            const showFormBtn = document.getElementById('showFormBtn');
-            const formContainer = document.getElementById('formContainer');
-            const cancelBtn = document.getElementById('cancelFormBtn');
-            showFormBtn.onclick = () => { formContainer.style.display = 'block'; showFormBtn.style.display = 'none'; };
-            cancelBtn.onclick = () => { formContainer.style.display = 'none'; showFormBtn.style.display = 'inline-flex'; document.getElementById('formEnvoi').reset(); document.getElementById('previewPhotoColis').innerHTML = ''; };
-            // FIX: le bouton Rafraîchir recharge aussi les users et les adresses
+            // ── 6. Boutons formulaire ──
+            showFormBtn.onclick = async () => {
+                formContainer.style.display = 'block';
+                showFormBtn.style.display = 'none';
+                showNotification("📝 Formulaire ouvert — chargement des bureaux...", "info");
+                await chargerLivreurs(); // recharger à chaque ouverture du formulaire
+            };
+            cancelBtn.onclick = () => {
+                formContainer.style.display = 'none';
+                showFormBtn.style.display = 'inline-flex';
+                formEnvoi.reset();
+                document.getElementById('previewPhotoColis').innerHTML = '';
+                updatePrix();
+                showNotification("❎ Formulaire annulé", "info");
+            };
+
+            // ── 7. Bouton Rafraîchir ──
             document.getElementById('refreshLocalBtn')?.addEventListener('click', async () => {
+                showNotification("🔄 Rafraîchissement en cours...", "info");
                 try {
-                    const [freshColis] = await Promise.all([
-                        apiRequest('/colis')
-                    ]);
-                    appData.colis = freshColis;
-                    afficherColisReceveur();
-                    await afficherAdressesBureaux();
-                    showNotification("Données rafraîchies", "success");
+                    await Promise.all([afficherColisReceveur(), afficherAdressesBureaux()]);
+                    showNotification("✅ Données rafraîchies avec succès", "success");
                 } catch(e) {
-                    showNotification("Erreur lors du rafraîchissement", "error");
+                    showNotification("❌ Erreur lors du rafraîchissement", "error");
                 }
             });
 
-            const formEnvoi = document.getElementById('formEnvoi');
+            // ── 8. Soumission du formulaire ──
             formEnvoi.addEventListener('submit', async (e) => {
                 e.preventDefault();
+
+                // Validation champs
                 const destLivreurId = destSelect.value;
-                if (!destLivreurId) { showNotification("Choisissez un bureau livreur", "error"); return; }
+                if (!destLivreurId) {
+                    showNotification("⚠️ Veuillez sélectionner un bureau de livraison", "error");
+                    return;
+                }
                 const expediteur = document.getElementById('expediteurNom').value.trim();
-                const destNom = document.getElementById('destinataireNom').value.trim();
-                const adresse = document.getElementById('destinataireAdresse').value.trim();
-                const tel = document.getElementById('destinataireTel').value.trim();
-                const cni = document.getElementById('destinataireCni').value.trim();
+                const destNom    = document.getElementById('destinataireNom').value.trim();
+                const adresse    = document.getElementById('destinataireAdresse').value.trim();
+                const tel        = document.getElementById('destinataireTel').value.trim();
+                const cni        = document.getElementById('destinataireCni').value.trim();
                 const poidsLivre = parseFloat(poidsField.value);
-                if (!expediteur || !destNom || !adresse || isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("Champs obligatoires", "error"); return; }
-                let photoBase64 = null;
-                if (photoInput.files.length) photoBase64 = await readFileAsBase64(photoInput.files[0]);
-                const prixUsd = calculerPrixTotalUSD(poidsLivre);
-                const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
-                const tracking = genTracking();
-                const livreurUser = appData.users.find(u => u._id === destLivreurId);
-                const newColis = {
-                    numeroSuivi: tracking,
-                    bureauEnvoiId: currentUser._id,
-                    bureauEnvoiNom: currentUser.bureauNom,
-                    bureauLivreurId: destLivreurId,
-                    bureauLivreurNom: livreurUser ? livreurUser.bureauNom : "inconnu",
-                    expediteurNom: expediteur,
-                    destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
-                    poidsLivre: poidsLivre,
-                    prixUsd: prixUsd,
-                    prixGourdes: prixGourdes,
-                    photoColis: photoBase64,
-                    confirme: false,
-                    statut: "En attente",
-                    paiement: { effectue: false }
-                };
+
+                if (!expediteur) { showNotification("⚠️ Le nom de l'expéditeur est requis", "error"); return; }
+                if (!destNom)    { showNotification("⚠️ Le nom du destinataire est requis", "error"); return; }
+                if (!adresse)    { showNotification("⚠️ L'adresse du destinataire est requise", "error"); return; }
+                if (isNaN(poidsLivre) || poidsLivre <= 0) { showNotification("⚠️ Veuillez entrer un poids valide (> 0)", "error"); return; }
+
+                // Désactiver le bouton pendant l'envoi
+                const submitBtn = formEnvoi.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = '⏳ Enregistrement...';
+                showNotification("⏳ Envoi du colis en cours...", "info");
+
                 try {
+                    let photoBase64 = null;
+                    if (photoInput.files.length) {
+                        photoBase64 = await readFileAsBase64(photoInput.files[0]);
+                        showNotification("📸 Photo du colis encodée", "info");
+                    }
+
+                    const prixUsd    = calculerPrixTotalUSD(poidsLivre);
+                    const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
+                    const tracking   = genTracking();
+
+                    // Récupérer le livreur depuis appData.users (rechargé lors de l'ouverture du formulaire)
+                    const livreurUser = appData.users.find(u => u._id === destLivreurId);
+                    const livreurNom  = livreurUser ? livreurUser.bureauNom : destSelect.options[destSelect.selectedIndex]?.text || 'Bureau inconnu';
+
+                    const newColis = {
+                        numeroSuivi: tracking,
+                        bureauEnvoiId: currentUser._id,
+                        bureauEnvoiNom: currentUser.bureauNom,
+                        bureauLivreurId: destLivreurId,
+                        bureauLivreurNom: livreurNom,
+                        expediteurNom: expediteur,
+                        destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
+                        poidsLivre,
+                        prixUsd,
+                        prixGourdes,
+                        photoColis: photoBase64,
+                        confirme: false,
+                        statut: "En attente",
+                        paiement: { effectue: false }
+                    };
+
                     const saved = await apiRequest('/colis', 'POST', newColis);
                     addLocalColis(saved);
-                    showNotification(`Colis ${tracking} enregistré, en attente de validation superviseur`, "info");
+
+                    // Notifications de succès détaillées
+                    showNotification(`✅ Colis ${tracking} enregistré avec succès !`, "success");
+                    showNotification(`📦 ${destNom} – ${poidsLivre} lb – ${prixUsd.toFixed(2)} USD`, "info");
+                    if (appData.company.superviseurActif !== false) {
+                        showNotification("🛂 En attente de validation par le superviseur", "info");
+                    } else {
+                        showNotification("✈️ Colis mis en transit automatiquement", "success");
+                    }
+
+                    // Réinitialiser le formulaire
                     formContainer.style.display = 'none';
                     showFormBtn.style.display = 'inline-flex';
                     formEnvoi.reset();
                     document.getElementById('previewPhotoColis').innerHTML = '';
-                    afficherColisReceveur();
-                } catch (err) { showNotification("Erreur création", "error"); }
+                    updatePrix();
+
+                    // Rafraîchir la liste
+                    await afficherColisReceveur();
+
+                } catch (err) {
+                    console.error('Erreur enregistrement colis:', err);
+                    // Afficher le vrai message d'erreur du serveur
+                    let msg = "❌ Erreur lors de l'enregistrement du colis.";
+                    try {
+                        const parsed = JSON.parse(err.message.replace(/^Erreur \d+: /, ''));
+                        if (parsed.error) msg = "❌ " + parsed.error;
+                    } catch(_) {
+                        if (err.message) msg = "❌ " + err.message;
+                    }
+                    showNotification(msg, "error");
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '✅ Enregistrer colis';
+                }
             });
+
+            // ── 9. Chargement initial ──
+            await afficherColisReceveur();
+            await afficherAdressesBureaux();
         }
 
         // ========== LIVREUR ==========

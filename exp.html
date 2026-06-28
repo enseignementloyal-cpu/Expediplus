@@ -622,11 +622,34 @@
             }
             afficherColisReceveur();
 
-            function afficherAdressesBureaux() {
+            // FIX: chargement en temps réel depuis le serveur (et non depuis le cache local)
+            async function afficherAdressesBureaux() {
                 const container = document.getElementById('bureauxAddresses');
                 if (!container) return;
-                const bureaux = appData.users.filter(u => u.role === 'receveur' || u.role === 'livreur');
-                container.innerHTML = bureaux.map(b => `<div class="address-card"><strong>${b.bureauNom}</strong><br>${b.adresse || 'Adresse non renseignée'}<br><span style="font-size:0.8rem; color:#4b6e8a;">${b.role === 'receveur' ? "Bureau d'envoi" : 'Bureau de livraison'}</span></div>`).join('');
+                container.innerHTML = '<div class="loader" style="padding:16px;">Chargement des adresses...</div>';
+                try {
+                    // Recharger les users depuis le serveur à chaque fois
+                    const freshUsers = await apiRequest('/users');
+                    appData.users = freshUsers;
+                    const bureaux = freshUsers.filter(u => u.role === 'receveur' || u.role === 'livreur');
+                    if (bureaux.length === 0) {
+                        container.innerHTML = '<div class="address-card" style="color:#b45309;">Aucun bureau trouvé. Contactez l\'administrateur.</div>';
+                        return;
+                    }
+                    container.innerHTML = bureaux.map(b => `
+                        <div class="address-card">
+                            <strong>${b.bureauNom || b.nom}</strong><br>
+                            ${b.adresse ? `📍 ${b.adresse}` : '<em style="color:#aaa;">Adresse non renseignée</em>'}<br>
+                            ${b.email ? `✉️ ${b.email}<br>` : ''}
+                            <span style="font-size:0.8rem; color:#4b6e8a; margin-top:4px; display:inline-block;">
+                                ${b.role === 'receveur' ? "📤 Bureau d'envoi" : '📬 Bureau de livraison'}
+                            </span>
+                        </div>
+                    `).join('');
+                } catch (err) {
+                    console.error('Erreur chargement adresses:', err);
+                    container.innerHTML = '<div class="address-card" style="color:#b91c1c;">❌ Impossible de charger les adresses. Réessayez.</div>';
+                }
             }
             afficherAdressesBureaux();
 
@@ -635,11 +658,19 @@
             const cancelBtn = document.getElementById('cancelFormBtn');
             showFormBtn.onclick = () => { formContainer.style.display = 'block'; showFormBtn.style.display = 'none'; };
             cancelBtn.onclick = () => { formContainer.style.display = 'none'; showFormBtn.style.display = 'inline-flex'; document.getElementById('formEnvoi').reset(); document.getElementById('previewPhotoColis').innerHTML = ''; };
+            // FIX: le bouton Rafraîchir recharge aussi les users et les adresses
             document.getElementById('refreshLocalBtn')?.addEventListener('click', async () => {
-                const freshColis = await apiRequest('/colis');
-                appData.colis = freshColis;
-                afficherColisReceveur();
-                showNotification("Données rafraîchies", "success");
+                try {
+                    const [freshColis] = await Promise.all([
+                        apiRequest('/colis')
+                    ]);
+                    appData.colis = freshColis;
+                    afficherColisReceveur();
+                    await afficherAdressesBureaux();
+                    showNotification("Données rafraîchies", "success");
+                } catch(e) {
+                    showNotification("Erreur lors du rafraîchissement", "error");
+                }
             });
 
             const formEnvoi = document.getElementById('formEnvoi');

@@ -153,8 +153,7 @@ const publicContentSchema = new mongoose.Schema({
 });
 const PublicContent = mongoose.model('PublicContent', publicContentSchema);
 
-// ---------- FLAG DE MIGRATION ----------
-// Pendant la migration, le login retourne une erreur explicite
+// Flag pour bloquer le login pendant la migration des mots de passe
 let migrationEnCours = false;
 
 // ---------- MIDDLEWARE AUTH CLIENT ----------
@@ -235,27 +234,32 @@ app.get('/api/colis', async (req, res) => {
 });
 
 app.post('/api/colis', async (req, res) => {
-    const company = await Company.findOne();
-    if (company && company.superviseurActif === false) {
-        req.body.confirme = true;
-        req.body.statut = 'En transit';
-    }
-    const colis = new Colis(req.body);
-    await colis.save();
-    if (colis.destinataire.telephone) {
-        const client = await Client.findOne({ telephone: colis.destinataire.telephone });
-        if (client) {
-            client.notifications.unshift({
-                date: new Date(),
-                message: `📦 Nouveau colis enregistré pour vous: ${colis.numeroSuivi}. Il sera visible dès son arrivée au bureau.`,
-                type: 'info',
-                lu: false
-            });
-            if (client.notifications.length > 50) client.notifications.pop();
-            await client.save();
+    try {
+        const company = await Company.findOne();
+        if (company && company.superviseurActif === false) {
+            req.body.confirme = true;
+            req.body.statut = 'En transit';
         }
+        const colis = new Colis(req.body);
+        await colis.save();
+        if (colis.destinataire && colis.destinataire.telephone) {
+            const client = await Client.findOne({ telephone: colis.destinataire.telephone });
+            if (client) {
+                client.notifications.unshift({
+                    date: new Date(),
+                    message: `📦 Nouveau colis enregistré pour vous: ${colis.numeroSuivi}. Il sera visible dès son arrivée au bureau.`,
+                    type: 'info',
+                    lu: false
+                });
+                if (client.notifications.length > 50) client.notifications.pop();
+                await client.save();
+            }
+        }
+        res.status(201).json(colis);
+    } catch (err) {
+        console.error('Erreur création colis:', err);
+        res.status(500).json({ error: 'Erreur lors de la création du colis: ' + err.message });
     }
-    res.status(201).json(colis);
 });
 
 app.put('/api/colis/:id', async (req, res) => {
@@ -317,30 +321,27 @@ app.post('/api/notifications', async (req, res) => {
 
 // Auth employé
 app.post('/api/auth/login', async (req, res) => {
-    // FIX: Bloquer le login proprement pendant la migration des mots de passe
     if (migrationEnCours) {
-        return res.status(503).json({ error: 'Serveur en cours d\'initialisation, veuillez réessayer dans quelques secondes.' });
+        return res.status(503).json({ error: 'Serveur en cours d\'initialisation, réessayez dans quelques secondes.' });
     }
-
     const { identifier, password } = req.body;
     if (!identifier || !password) {
         return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
     }
-    let user;
-    if (identifier.includes('@')) {
-        user = await User.findOne({ email: identifier });
-    } else {
-        user = await User.findOne({ code: identifier });
-    }
-    if (!user) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
-
     try {
+        let user;
+        if (identifier.includes('@')) {
+            user = await User.findOne({ email: identifier });
+        } else {
+            user = await User.findOne({ code: identifier });
+        }
+        if (!user) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect' });
         res.json({ ...user._doc, password: undefined });
     } catch (err) {
-        console.error('Erreur bcrypt:', err);
-        return res.status(500).json({ error: 'Erreur interne lors de la vérification du mot de passe' });
+        console.error('Erreur login:', err);
+        return res.status(500).json({ error: 'Erreur interne du serveur' });
     }
 });
 
@@ -475,9 +476,9 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
     res.json({ success: true });
 });
 
-// ---------- MIGRATION DES MOTS DE PASSE (CRITIQUE) ----------
+// ---------- MIGRATION DES MOTS DE PASSE ----------
 async function upgradePasswords() {
-    migrationEnCours = true; // FIX: signaler que la migration est en cours
+    migrationEnCours = true;
     console.log('🔍 Vérification des mots de passe utilisateurs...');
     const users = await User.find({});
     let modified = 0;
@@ -486,7 +487,7 @@ async function upgradePasswords() {
             console.log(`  ⚠️  Mot de passe non haché pour ${user.nom} (${user.code})`);
             const newPassword = user.code || 'default123';
             const hashed = await bcrypt.hash(newPassword, 10);
-            // FIX: utiliser findByIdAndUpdate pour éviter les conflits de lecture/écriture
+            // Écriture atomique pour éviter les conflits
             await User.findByIdAndUpdate(user._id, { password: hashed });
             modified++;
             console.log(`  ✅ Mot de passe réinitialisé pour ${user.nom} avec son code (${newPassword})`);
@@ -497,7 +498,7 @@ async function upgradePasswords() {
     } else {
         console.log('✅ Tous les mots de passe sont déjà hachés.');
     }
-    migrationEnCours = false; // FIX: migration terminée, login autorisé
+    migrationEnCours = false;
 }
 
 // ---------- CONNEXION MONGODB ----------
@@ -506,11 +507,11 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
     .then(async () => {
         console.log('✅ Connecté à MongoDB Atlas');
 
-        // FIX: Démarrer le serveur AVANT la migration pour ne pas bloquer les requêtes
+        // Démarrer le serveur AVANT la migration (le flag bloque /auth/login pendant ce temps)
         const PORT = process.env.PORT || 3000;
         app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
 
-        // Lancer la migration en arrière-plan (flag migrationEnCours bloque /api/auth/login pendant ce temps)
+        // Migration en arrière-plan
         await upgradePasswords();
 
         const userCount = await User.countDocuments();

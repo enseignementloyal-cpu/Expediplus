@@ -487,7 +487,7 @@
             const cancelBtn     = document.getElementById('cancelFormBtn');
             const formEnvoi     = document.getElementById('formEnvoi');
 
-            // Calcul du prix
+            // Calcul du prix en temps réel
             const updatePrix = () => {
                 let p = parseFloat(poidsField.value) || 0;
                 if (p <= 0) p = 0.1;
@@ -496,7 +496,6 @@
                 gourdesField.value = (usd * appData.company.tauxUSDToHTG).toFixed(2) + ' HTG';
             };
             poidsField.addEventListener('input', updatePrix);
-            updatePrix();
 
             // Aperçu photo
             photoInput.addEventListener('change', (e) => {
@@ -506,13 +505,13 @@
                     const reader = new FileReader();
                     reader.onload = (ev) => { preview.innerHTML = `<img src="${ev.target.result}" class="photo-thumb" style="max-width:100px;">`; };
                     reader.readAsDataURL(file);
-                    showNotification('📸 Photo du colis sélectionnée', 'info');
+                    showNotification('📸 Photo sélectionnée', 'info');
                 } else {
                     preview.innerHTML = '';
                 }
             });
 
-            // Charger la liste des livreurs dans le select (depuis le serveur)
+            // Charger les livreurs depuis le serveur dans le select
             async function chargerSelectLivreurs() {
                 try {
                     const freshUsers = await apiRequest('/users');
@@ -527,25 +526,25 @@
                     livreurs.forEach(l => {
                         const opt = document.createElement('option');
                         opt.value = l._id;
-                        opt.textContent = `${l.bureauNom} - ${l.adresse || 'Adresse non renseignée'}`;
+                        opt.textContent = l.bureauNom + ' - ' + (l.adresse || 'Adresse non renseignée');
                         destSelect.appendChild(opt);
                     });
-                    showNotification(`✅ ${livreurs.length} bureau(x) de livraison disponible(s)`, 'success');
+                    showNotification('✅ ' + livreurs.length + ' bureau(x) de livraison disponible(s)', 'success');
                 } catch (err) {
                     showNotification('❌ Impossible de charger les bureaux livreurs', 'error');
                 }
             }
 
-            // Afficher les colis du receveur (depuis le serveur, filtré par bureauEnvoiId)
+            // Afficher les colis du receveur (rechargés depuis le serveur)
             async function afficherColisReceveur() {
                 const container = document.getElementById('colisListReceveur');
                 if (!container) return;
-                container.innerHTML = '<div style="padding:12px; color:#64748b;">Chargement...</div>';
+                container.innerHTML = '<div style="padding:12px;color:#64748b;">Chargement...</div>';
                 try {
-                    const mesColis = await apiRequest(`/colis?bureauEnvoiId=${currentUser._id}`);
+                    const mesColis = await apiRequest('/colis?bureauEnvoiId=' + currentUser._id);
                     appData.colis = mesColis;
                     if (mesColis.length === 0) {
-                        container.innerHTML = '<div style="padding:12px; color:#64748b;">📭 Aucun colis enregistré pour l\'instant.</div>';
+                        container.innerHTML = '<div style="padding:12px;color:#64748b;">📭 Aucun colis pour l'instant.</div>';
                         return;
                     }
                     container.innerHTML = '';
@@ -556,41 +555,36 @@
                         const badgeClass = c.confirme ? (c.statut === 'En transit' ? 'status-transit' : 'status-arrive') : 'status-attente';
                         const div = document.createElement('div');
                         div.className = 'colis-card';
-                        div.innerHTML = `
-                            <div class="flex-row">
-                                <div><strong>${c.numeroSuivi}</strong> - <span class="badge ${badgeClass}">${statutAff}</span></div>
-                                <button class="btn-outline print-label-btn" data-id="${c._id}" style="padding:4px 12px;">🏷️ Imprimer étiquette</button>
-                            </div>
-                            <div>👤 Expéditeur: ${c.expediteurNom}</div>
-                            <div>📦 Destinataire: ${c.destinataire.nom} (${c.destinataire.adresse})</div>
-                            <div>🏢 Bureau livreur: ${c.bureauLivreurNom} - ${adresseLivreur}</div>
-                            <div>💰 ${c.prixUsd} USD / ${c.prixGourdes} HTG &nbsp;|&nbsp; ⚖️ ${c.poidsLivre} lb</div>
-                            <div style="font-size:0.8rem; color:#94a3b8;">📅 ${new Date(c.dateEnvoi).toLocaleString()}</div>
-                            ${c.photoColis ? `<img src="${c.photoColis}" class="photo-thumb">` : ''}
-                        `;
+                        div.innerHTML =
+                            '<div class="flex-row">' +
+                                '<div><strong>' + c.numeroSuivi + '</strong> - <span class="badge ' + badgeClass + '">' + statutAff + '</span></div>' +
+                                '<button class="btn-outline print-label-btn" data-id="' + c._id + '" style="padding:4px 12px;">🏷️ Étiquette</button>' +
+                            '</div>' +
+                            '<div>👤 Expéditeur: ' + c.expediteurNom + '</div>' +
+                            '<div>📦 Destinataire: ' + c.destinataire.nom + ' (' + c.destinataire.adresse + ')</div>' +
+                            '<div>🏢 Bureau livreur: ' + c.bureauLivreurNom + ' - ' + adresseLivreur + '</div>' +
+                            '<div>💰 ' + c.prixUsd + ' USD / ' + c.prixGourdes + ' HTG | ⚖️ ' + c.poidsLivre + ' lb</div>' +
+                            (c.photoColis ? '<img src="' + c.photoColis + '" class="photo-thumb">' : '');
                         container.appendChild(div);
                     }
                     document.querySelectorAll('.print-label-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const id = btn.getAttribute('data-id');
                             const colis = appData.colis.find(c => c._id === id);
-                            if (colis) {
-                                printReceptionLabel(colis);
-                                showNotification(`🏷️ Étiquette imprimée — ${colis.numeroSuivi}`, 'info');
-                            }
+                            if (colis) { printReceptionLabel(colis); showNotification('🏷️ Étiquette imprimée', 'info'); }
                         });
                     });
                 } catch (err) {
-                    container.innerHTML = '<div style="color:#b91c1c; padding:12px;">❌ Impossible de charger les colis.</div>';
+                    container.innerHTML = '<div style="color:#b91c1c;padding:12px;">❌ Impossible de charger les colis.</div>';
                     showNotification('❌ Erreur chargement des colis', 'error');
                 }
             }
 
-            // Afficher les adresses des bureaux partenaires (depuis le serveur)
+            // Afficher les adresses des bureaux (rechargées depuis le serveur)
             async function afficherAdressesBureaux() {
                 const container = document.getElementById('bureauxAddresses');
                 if (!container) return;
-                container.innerHTML = '<div style="padding:12px; color:#64748b;">Chargement des adresses...</div>';
+                container.innerHTML = '<div style="padding:12px;color:#64748b;">Chargement des adresses...</div>';
                 try {
                     const freshUsers = await apiRequest('/users');
                     appData.users = freshUsers;
@@ -599,27 +593,26 @@
                         container.innerHTML = '<div class="address-card">Aucun bureau trouvé.</div>';
                         return;
                     }
-                    container.innerHTML = bureaux.map(b => `
-                        <div class="address-card">
-                            <strong>${b.bureauNom}</strong><br>
-                            ${b.adresse || '<em>Adresse non renseignée</em>'}<br>
-                            ${b.email ? `✉️ ${b.email}<br>` : ''}
-                            <span style="font-size:0.8rem; color:#4b6e8a;">${b.role === 'receveur' ? "📤 Bureau d'envoi" : '📬 Bureau de livraison'}</span>
-                        </div>`).join('');
+                    container.innerHTML = bureaux.map(b =>
+                        '<div class="address-card"><strong>' + b.bureauNom + '</strong><br>' +
+                        (b.adresse || '<em>Adresse non renseignée</em>') + '<br>' +
+                        (b.email ? '✉️ ' + b.email + '<br>' : '') +
+                        '<span style="font-size:0.8rem;color:#4b6e8a;">' + (b.role === 'receveur' ? "📤 Bureau d'envoi" : '📬 Bureau de livraison') + '</span></div>'
+                    ).join('');
                 } catch (err) {
                     container.innerHTML = '<div class="address-card" style="color:#b91c1c;">❌ Impossible de charger les adresses.</div>';
                 }
             }
 
-            // Bouton Nouveau colis : charger les livreurs à l'ouverture
+            // Ouvrir le formulaire : charger les livreurs depuis le serveur
             showFormBtn.onclick = async () => {
                 formContainer.style.display = 'block';
                 showFormBtn.style.display = 'none';
-                await chargerSelectLivreurs();
                 updatePrix();
+                await chargerSelectLivreurs();
             };
 
-            // Bouton Annuler
+            // Annuler le formulaire
             cancelBtn.onclick = () => {
                 formContainer.style.display = 'none';
                 showFormBtn.style.display = 'inline-flex';
@@ -629,7 +622,7 @@
                 showNotification('❎ Formulaire annulé', 'info');
             };
 
-            // Bouton Rafraîchir
+            // Rafraîchir
             document.getElementById('refreshLocalBtn')?.addEventListener('click', async () => {
                 showNotification('🔄 Rafraîchissement...', 'info');
                 await afficherColisReceveur();
@@ -637,40 +630,35 @@
                 showNotification('✅ Données mises à jour', 'success');
             });
 
-            // Soumission du formulaire
+            // Soumettre le formulaire
             formEnvoi.addEventListener('submit', async (e) => {
                 e.preventDefault();
-
                 const destLivreurId = destSelect.value;
                 if (!destLivreurId) { showNotification('⚠️ Choisissez un bureau de livraison', 'error'); return; }
-
                 const expediteur = document.getElementById('expediteurNom').value.trim();
                 const destNom    = document.getElementById('destinataireNom').value.trim();
                 const adresse    = document.getElementById('destinataireAdresse').value.trim();
                 const tel        = document.getElementById('destinataireTel').value.trim();
                 const cni        = document.getElementById('destinataireCni').value.trim();
                 const poidsLivre = parseFloat(poidsField.value);
-
                 if (!expediteur) { showNotification("⚠️ Nom de l'expéditeur requis", 'error'); return; }
                 if (!destNom)    { showNotification('⚠️ Nom du destinataire requis', 'error'); return; }
                 if (!adresse)    { showNotification('⚠️ Adresse du destinataire requise', 'error'); return; }
-                if (isNaN(poidsLivre) || poidsLivre <= 0) { showNotification('⚠️ Poids invalide (doit être > 0)', 'error'); return; }
+                if (isNaN(poidsLivre) || poidsLivre <= 0) { showNotification('⚠️ Poids invalide (> 0)', 'error'); return; }
 
                 const submitBtn = formEnvoi.querySelector('button[type="submit"]');
                 submitBtn.disabled = true;
                 submitBtn.textContent = '⏳ Enregistrement...';
-                showNotification('⏳ Enregistrement du colis en cours...', 'info');
+                showNotification('⏳ Enregistrement du colis...', 'info');
 
                 try {
                     let photoBase64 = null;
                     if (photoInput.files.length) photoBase64 = await readFileAsBase64(photoInput.files[0]);
-
                     const prixUsd     = calculerPrixTotalUSD(poidsLivre);
                     const prixGourdes = prixUsd * appData.company.tauxUSDToHTG;
                     const tracking    = genTracking();
                     const livreurUser = appData.users.find(u => u._id === destLivreurId);
                     const livreurNom  = livreurUser ? livreurUser.bureauNom : (destSelect.options[destSelect.selectedIndex]?.text || 'Bureau inconnu');
-
                     const newColis = {
                         numeroSuivi: tracking,
                         bureauEnvoiId: currentUser._id,
@@ -678,34 +666,29 @@
                         bureauLivreurId: destLivreurId,
                         bureauLivreurNom: livreurNom,
                         expediteurNom: expediteur,
-                        destinataire: { nom: destNom, adresse, telephone: tel, cni: cni || '' },
-                        poidsLivre, prixUsd, prixGourdes,
+                        destinataire: { nom: destNom, adresse: adresse, telephone: tel, cni: cni || '' },
+                        poidsLivre: poidsLivre,
+                        prixUsd: prixUsd,
+                        prixGourdes: prixGourdes,
                         photoColis: photoBase64,
                         confirme: false,
                         statut: 'En attente',
                         paiement: { effectue: false }
                     };
-
                     const saved = await apiRequest('/colis', 'POST', newColis);
                     addLocalColis(saved);
-
-                    showNotification(`✅ Colis ${tracking} enregistré avec succès !`, 'success');
-                    showNotification(`📦 ${destNom} — ${poidsLivre} lb — ${prixUsd.toFixed(2)} USD`, 'info');
-                    showNotification(appData.company.superviseurActif !== false
-                        ? '🛂 En attente de validation par le superviseur'
-                        : '✈️ Mis en transit automatiquement', 'info');
-
+                    showNotification('✅ Colis ' + tracking + ' enregistré avec succès !', 'success');
+                    showNotification('📦 ' + destNom + ' — ' + poidsLivre + ' lb — ' + prixUsd.toFixed(2) + ' USD', 'info');
+                    showNotification(appData.company.superviseurActif !== false ? '🛂 En attente de validation superviseur' : '✈️ Mis en transit automatiquement', 'info');
                     formContainer.style.display = 'none';
                     showFormBtn.style.display = 'inline-flex';
                     formEnvoi.reset();
                     document.getElementById('previewPhotoColis').innerHTML = '';
                     updatePrix();
                     await afficherColisReceveur();
-
                 } catch (err) {
                     let msg = "❌ Erreur lors de l'enregistrement.";
-                    try { const p = JSON.parse(err.message.replace(/^Erreur \d+: /, '')); if (p.error) msg = '❌ ' + p.error; }
-                    catch(_) { if (err.message) msg = '❌ ' + err.message; }
+                    try { const p = JSON.parse(err.message.replace(/^Erreur \d+: /, '')); if (p.error) msg = '❌ ' + p.error; } catch(_) { if (err.message) msg = '❌ ' + err.message; }
                     showNotification(msg, 'error');
                 } finally {
                     submitBtn.disabled = false;
@@ -713,7 +696,7 @@
                 }
             });
 
-            // Chargement initial (sans await qui bloquerait render)
+            // Chargement initial
             afficherColisReceveur();
             afficherAdressesBureaux();
         }

@@ -153,9 +153,6 @@ const publicContentSchema = new mongoose.Schema({
 });
 const PublicContent = mongoose.model('PublicContent', publicContentSchema);
 
-// Flag pour bloquer le login pendant la migration des mots de passe
-let migrationEnCours = false;
-
 // ---------- MIDDLEWARE AUTH CLIENT ----------
 const authClient = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -321,9 +318,6 @@ app.post('/api/notifications', async (req, res) => {
 
 // Auth employé
 app.post('/api/auth/login', async (req, res) => {
-    if (migrationEnCours) {
-        return res.status(503).json({ error: 'Serveur en cours d\'initialisation, réessayez dans quelques secondes.' });
-    }
     const { identifier, password } = req.body;
     if (!identifier || !password) {
         return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
@@ -477,28 +471,24 @@ app.delete('/api/clients/notifications', authClient, async (req, res) => {
 });
 
 // ---------- MIGRATION DES MOTS DE PASSE ----------
+// Tourne en arrière-plan, ne bloque jamais le login
 async function upgradePasswords() {
-    migrationEnCours = true;
-    console.log('🔍 Vérification des mots de passe utilisateurs...');
-    const users = await User.find({});
-    let modified = 0;
-    for (const user of users) {
-        if (!user.password || !user.password.startsWith('$2b$')) {
-            console.log(`  ⚠️  Mot de passe non haché pour ${user.nom} (${user.code})`);
-            const newPassword = user.code || 'default123';
-            const hashed = await bcrypt.hash(newPassword, 10);
-            // Écriture atomique pour éviter les conflits
-            await User.findByIdAndUpdate(user._id, { password: hashed });
-            modified++;
-            console.log(`  ✅ Mot de passe réinitialisé pour ${user.nom} avec son code (${newPassword})`);
+    try {
+        const users = await User.find({});
+        let modified = 0;
+        for (const user of users) {
+            if (!user.password || !user.password.startsWith('$2b$')) {
+                const newPassword = user.code || 'default123';
+                const hashed = await bcrypt.hash(newPassword, 10);
+                await User.findByIdAndUpdate(user._id, { password: hashed });
+                modified++;
+                console.log(`  ✅ Mot de passe migré pour ${user.nom}`);
+            }
         }
+        console.log(modified > 0 ? `✅ ${modified} mot(s) de passe migrés.` : '✅ Tous les mots de passe sont déjà hachés.');
+    } catch (err) {
+        console.error('❌ Erreur migration mots de passe:', err);
     }
-    if (modified > 0) {
-        console.log(`✅ ${modified} mot(s) de passe mis à jour en bcrypt.`);
-    } else {
-        console.log('✅ Tous les mots de passe sont déjà hachés.');
-    }
-    migrationEnCours = false;
 }
 
 // ---------- CONNEXION MONGODB ----------
@@ -506,12 +496,8 @@ const MONGODB_URI = process.env.MONGODB_URL || 'mongodb+srv://<username>:<passwo
 mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(async () => {
         console.log('✅ Connecté à MongoDB Atlas');
-
-        // Démarrer le serveur AVANT la migration (le flag bloque /auth/login pendant ce temps)
-        const PORT = process.env.PORT || 3000;
-        app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
-
-        // Migration en arrière-plan
+        
+        // Migration des mots de passe pour tous les utilisateurs
         await upgradePasswords();
 
         const userCount = await User.countDocuments();
@@ -546,6 +532,10 @@ mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true 
             ]);
             console.log('📦 Bureaux par défaut créés');
         }
+
+        // Démarrer le serveur
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, () => console.log(`🚀 Serveur prêt sur le port ${PORT}`));
     })
     .catch(err => {
         console.error('❌ Erreur MongoDB:', err);
